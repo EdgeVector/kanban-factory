@@ -1,0 +1,11 @@
+{
+  "name": "kanban-factory",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Animated live theater for your real Kanban board + routines",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node server.mjs"
+  }
+}

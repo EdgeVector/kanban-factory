@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.edgevector.kanban-factory</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/tomtang/code/edgevector/kanban-factory/scripts/run.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/tomtang/code/edgevector/kanban-factory</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/tomtang</string>
+    <key>USER</key>
+    <string>tomtang</string>
+    <key>PATH</key>
+    <string>/Users/tomtang/.local/bin:/Users/tomtang/.bun/bin:/Users/tomtang/.cargo/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PORT</key>
+    <string>4177</string>
+    <key>POLL_MS</key>
+    <string>4000</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/tomtang/Library/Logs/kanban-factory.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/tomtang/Library/Logs/kanban-factory.err.log</string>
+</dict>
+</plist>

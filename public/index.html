@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kanban Factory — Live Theater</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+</head>
+<body class="shift-day">
+  <div id="bg-grid"></div>
+  <div id="bg-glow" aria-hidden="true"></div>
+  <canvas id="fx" aria-hidden="true"></canvas>
+  <div id="shake-root">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">🏭</span>
+      <div>
+        <h1>Kanban Factory</h1>
+        <p class="tagline">Live board theater · real tasks · real routines</p>
+      </div>
+    </div>
+    <div class="stats" id="stats">
+      <div class="stat"><span class="n" id="n-backlog">–</span><span class="l">backlog</span></div>
+      <div class="stat"><span class="n" id="n-todo">–</span><span class="l">todo</span></div>
+      <div class="stat hot"><span class="n" id="n-doing">–</span><span class="l">doing</span></div>
+      <div class="stat done"><span class="n" id="n-done">–</span><span class="l">done</span></div>
+      <div class="stat dim"><span class="n" id="n-blocked">–</span><span class="l">blocked</span></div>
+    </div>
+    <div class="session-hud" id="session-hud" title="Live board + this browser session">
+      <div class="hud-chip live-flight" title="Cards currently in Doing">
+        <span class="hud-n" id="hud-inflight">–</span><span class="hud-l">in flight</span>
+      </div>
+      <div class="hud-chip hands-live" title="Worker instances holding work">
+        <span class="hud-n" id="hud-hands">–</span><span class="hud-l">hands</span>
+      </div>
+      <div class="hud-chip ships" title="Ships animated this session"><span class="hud-n" id="hud-ships">0</span><span class="hud-l">ships</span></div>
+      <div class="hud-chip grabs" title="Grabs animated this session"><span class="hud-n" id="hud-grabs">0</span><span class="hud-l">grabs</span></div>
+      <div class="hud-chip streak" id="hud-streak-wrap" title="Consecutive ships this session">
+        <span class="hud-n" id="hud-streak">0</span><span class="hud-l">streak</span>
+      </div>
+      <div class="hud-chip shift"><span class="hud-n" id="hud-shift">DAY</span><span class="hud-l" id="hud-shift-label">shift</span></div>
+    </div>
+    <div class="controls">
+      <button id="btn-sound" class="chip" type="button" title="Toggle sound (S)">🔊 Sound</button>
+      <button id="btn-ambient" class="chip off" type="button" title="Soft factory hum">🎵 Hum</button>
+      <button id="btn-demo" class="chip" type="button" title="Parade (P)">✨ Parade</button>
+      <button id="btn-theater" class="chip" type="button" title="Theater mode (F)">🎬 Theater</button>
+      <span id="live-dot" class="live" title="Live polling">LIVE</span>
+    </div>
+  </header>
+
+  <div class="momentum" id="momentum" title="Recent board activity">
+    <div class="momentum-fill" id="momentum-fill"></div>
+    <span class="momentum-label" id="momentum-label">idle floor</span>
+  </div>
+
+  <section class="velocity-panel" id="velocity-panel" aria-label="Ship velocity">
+    <div class="speedo-wrap">
+      <div class="speedo" id="speedo" title="Ships per hour (last 3h)">
+        <svg viewBox="0 0 120 78" class="speedo-svg" aria-hidden="true">
+          <path class="speedo-track" d="M 14 62 A 46 46 0 0 1 106 62" fill="none" stroke-width="10" stroke-linecap="round"/>
+          <path class="speedo-arc" id="speedo-arc" d="M 14 62 A 46 46 0 0 1 106 62" fill="none" stroke-width="10" stroke-linecap="round"
+            stroke-dasharray="144.5" stroke-dashoffset="144.5"/>
+          <line class="speedo-needle" id="speedo-needle" x1="60" y1="62" x2="60" y2="22" stroke-width="2.5" stroke-linecap="round"/>
+          <circle cx="60" cy="62" r="4" class="speedo-hub"/>
+        </svg>
+        <div class="speedo-readout">
+          <span class="speedo-n" id="speedo-n">–</span>
+          <span class="speedo-u">ships/h</span>
+          <span class="speedo-sub" id="speedo-sub">last 3h</span>
+        </div>
+      </div>
+      <div class="velo-rates">
+        <div class="velo-rate" data-w="h3">
+          <span class="velo-ph" id="velo-ph-3">–</span>
+          <span class="velo-label">/h · 3h</span>
+          <span class="velo-count" id="velo-n-3">– ships</span>
+        </div>
+        <div class="velo-rate" data-w="h12">
+          <span class="velo-ph" id="velo-ph-12">–</span>
+          <span class="velo-label">/h · 12h</span>
+          <span class="velo-count" id="velo-n-12">– ships</span>
+        </div>
+        <div class="velo-rate" data-w="h24">
+          <span class="velo-ph" id="velo-ph-24">–</span>
+          <span class="velo-label">/h · 24h</span>
+          <span class="velo-count" id="velo-n-24">– ships</span>
+        </div>
+      </div>
+    </div>
+    <div class="velo-chart-wrap">
+      <div class="velo-chart-head">
+        <h2>Ships per hour</h2>
+        <span class="dim" id="velo-peak">peak —</span>
+      </div>
+      <div class="velo-chart" id="velo-chart" role="img" aria-label="Hourly ship chart last 24 hours"></div>
+      <p class="velo-note dim" id="velo-note">From done_at on cards still on the board</p>
+    </div>
+  </section>
+
+  <main class="stage">
+    <section class="pipeline" id="pipeline" aria-label="Kanban pipeline">
+      <div class="lane" data-col="backlog">
+        <header class="lane-head">
+          <span class="lane-icon">📦</span>
+          <h2>Backlog</h2>
+          <span class="lane-count" data-count="backlog">0</span>
+        </header>
+        <div class="belt"><div class="belt-shine"></div></div>
+        <div class="slot" id="slot-backlog"></div>
+      </div>
+      <div class="chute" data-from="backlog" data-to="todo" aria-hidden="true">
+        <div class="chute-rail"></div>
+        <div class="arrow">›</div>
+      </div>
+      <div class="lane" data-col="todo">
+        <header class="lane-head">
+          <span class="lane-icon">🎯</span>
+          <h2>Todo</h2>
+          <span class="lane-count" data-count="todo">0</span>
+        </header>
+        <div class="belt"><div class="belt-shine"></div></div>
+        <div class="slot" id="slot-todo"></div>
+      </div>
+      <div class="chute" data-from="todo" data-to="doing" aria-hidden="true">
+        <div class="chute-rail"></div>
+        <div class="arrow hot">›</div>
+      </div>
+      <div class="lane doing" data-col="doing">
+        <header class="lane-head">
+          <span class="lane-icon">⚡</span>
+          <h2>Doing</h2>
+          <span class="lane-count" data-count="doing">0</span>
+        </header>
+        <div class="belt hot"><div class="belt-shine"></div></div>
+        <div class="slot" id="slot-doing"></div>
+      </div>
+      <div class="chute" data-from="doing" data-to="done" aria-hidden="true">
+        <div class="chute-rail"></div>
+        <div class="arrow done">›</div>
+      </div>
+      <div class="lane done" data-col="done">
+        <header class="lane-head">
+          <span class="lane-icon">🏆</span>
+          <h2>Done</h2>
+          <span class="lane-count" data-count="done">0</span>
+        </header>
+        <div class="belt done"><div class="belt-shine"></div></div>
+        <div class="slot" id="slot-done"></div>
+      </div>
+    </section>
+
+    <section class="hands-panel" id="hands-panel">
+      <header>
+        <h2>Active Hands</h2>
+        <p>Workers holding <em>doing</em> cards right now (hover stack · click to cycle)</p>
+      </header>
+      <div id="hands" class="hands"></div>
+    </section>
+
+    <section class="floor">
+      <div class="crew-panel">
+        <header>
+          <h2>Routine Crew</h2>
+          <p>Each scheduled routine is a character on the floor. Hover for vibe + last heartbeat.</p>
+        </header>
+        <div id="crew" class="crew"></div>
+      </div>
+      <div class="feed-panel">
+        <header>
+          <h2>Factory Log</h2>
+          <p>Recent heartbeats & board moves</p>
+        </header>
+        <div id="feed" class="feed"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="tooltip" class="tooltip" hidden></div>
+  <div id="toast" class="toast" hidden></div>
+  <div id="float-layer" class="float-layer" aria-hidden="true"></div>
+  <div id="achievement" class="achievement" hidden>
+    <div class="ach-icon" id="ach-icon">🏆</div>
+    <div>
+      <div class="ach-title" id="ach-title">Achievement</div>
+      <div class="ach-sub" id="ach-sub"></div>
+    </div>
+  </div>
+  <div id="stamp" class="stamp" hidden aria-hidden="true">SHIPPED</div>
+
+  <div class="ticker" id="ticker" aria-label="Recent moves">
+    <div class="ticker-track" id="ticker-track">
+      <span class="ticker-item dim">waiting for the first move…</span>
+    </div>
+  </div>
+
+  <div class="kbd-hint" id="kbd-hint">S sound · P parade · F theater · H hum · click a card for sparkles</div>
+
+  </div><!-- #shake-root -->
+
+  <div id="boot" class="boot">
+    <div class="boot-card">
+      <div class="spinner"></div>
+      <p>Waking the factory floor…</p>
+      <p class="muted" id="boot-detail">First load pulls the live board (often a few seconds)</p>
+    </div>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
