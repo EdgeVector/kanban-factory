@@ -49,6 +49,10 @@
       <button id="btn-ambient" class="chip off" type="button" title="Soft factory hum">🎵 Hum</button>
       <button id="btn-demo" class="chip" type="button" title="Parade (P)">✨ Parade</button>
       <button id="btn-theater" class="chip" type="button" title="Theater mode (F)">🎬 Theater</button>
+      <button id="btn-lastdb-version" class="chip lastdb-chip" type="button" title="Running LastDB version (V)">
+        <span class="lastdb-chip-label">LastDB</span>
+        <span class="lastdb-chip-ver" id="lastdb-chip-ver">…</span>
+      </button>
       <span id="live-dot" class="live" title="Live polling">LIVE</span>
     </div>
   </header>
@@ -99,6 +103,44 @@
       </div>
       <div class="velo-chart" id="velo-chart" role="img" aria-label="Hourly ship chart last 24 hours"></div>
       <p class="velo-note dim" id="velo-note">From done_at on cards still on the board</p>
+    </div>
+  </section>
+
+  <section class="lastdb-panel collapsed" id="lastdb-panel" aria-label="Running LastDB version" hidden>
+    <header class="lastdb-panel-head">
+      <div>
+        <h2>🧬 Running LastDB</h2>
+        <p class="dim" id="lastdb-panel-sub">Binary vs local fold checkout — canary / safe-upgrade glance</p>
+      </div>
+      <button type="button" class="chip" id="btn-lastdb-close" title="Collapse panel">Hide</button>
+    </header>
+    <div class="lastdb-grid">
+      <div class="lastdb-card" id="lastdb-running">
+        <h3>Now running</h3>
+        <div class="lastdb-kv"><span class="k">daemon</span><span class="v mono" id="lastdb-daemon">–</span></div>
+        <div class="lastdb-kv"><span class="k">cli</span><span class="v mono" id="lastdb-cli">–</span></div>
+        <div class="lastdb-kv"><span class="k">sha</span><span class="v mono" id="lastdb-sha">–</span></div>
+        <div class="lastdb-kv"><span class="k">venue</span><span class="v" id="lastdb-venue">–</span></div>
+        <div class="lastdb-kv"><span class="k">uptime</span><span class="v" id="lastdb-uptime">–</span></div>
+        <div class="lastdb-kv"><span class="k">path</span><span class="v mono tiny" id="lastdb-path">–</span></div>
+      </div>
+      <div class="lastdb-card" id="lastdb-gap">
+        <h3>vs fold tip</h3>
+        <p class="lastdb-gap-summary" id="lastdb-gap-summary">–</p>
+        <p class="dim tiny" id="lastdb-main-ref">–</p>
+        <ul class="lastdb-commit-list" id="lastdb-commits-ahead"></ul>
+        <p class="dim tiny" id="lastdb-canary-note" hidden></p>
+        <ul class="lastdb-commit-list muted" id="lastdb-commits-canary"></ul>
+      </div>
+      <div class="lastdb-card" id="lastdb-releases-card">
+        <h3>Releases (local tags)</h3>
+        <ul class="lastdb-release-list" id="lastdb-releases"></ul>
+      </div>
+      <div class="lastdb-card" id="lastdb-trail-card">
+        <h3>Upgrade trail</h3>
+        <p class="dim tiny">Previous binaries next to the live sidebin (bak-pre-…)</p>
+        <ul class="lastdb-trail-list" id="lastdb-trail"></ul>
+      </div>
     </div>
   </section>
 

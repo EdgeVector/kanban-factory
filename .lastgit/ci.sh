@@ -51,4 +51,10 @@ rg -n 'list", \[.*"--json", "--all"' server.mjs \
   || rg -n 'list", \["--json", "--all"\]' server.mjs \
   || rg -n '"--json", "--all"' server.mjs
 
+echo "== LastDB version panel surface =="
+rg -n 'collectLastdbVersion|lastdbVersion|/api/lastdb-version' server.mjs >/dev/null
+rg -n 'renderLastdbVersion|lastdb-panel|btn-lastdb-version' public/app.js >/dev/null
+rg -n 'id="lastdb-panel"|btn-lastdb-version' public/index.html >/dev/null
+rg -n '\.lastdb-panel' public/styles.css >/dev/null
+
 echo "lastgit ci gate PASSED"

@@ -40,8 +40,20 @@ node server.mjs
 |--------|-----|
 | Live cards | `kanban list --json --all` (full board; bare `--json` caps at 12/column) |
 | Routine activity | `brain get routine-heartbeats --type reference` |
+| LastDB version panel | `lastdbd`/`lastdb --version` + `lastdb status` + local `git` against `FOLD_CHECKOUT` (default `~/code/edgevector/fold`) |
 
-Nothing is written to the board or brain.
+Nothing is written to the board or brain. Version panel is read-only (no upgrades).
+
+### LastDB version panel
+
+Top-bar chip shows the running Mini version + short SHA. Press **V** or click the
+chip to expand: commits on fold tip not in your binary, local release tags, and
+the sidebin `bak-pre-*` upgrade trail (handy for canaries / safe upgrades).
+
+```bash
+curl -sS http://127.0.0.1:4177/api/lastdb-version | jq '.running'
+# optional: FOLD_CHECKOUT=/path/to/fold POLL_MS=4000 node server.mjs
+```
 
 ## Features
 

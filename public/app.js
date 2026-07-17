@@ -1205,6 +1205,7 @@ async function applyState(data) {
   });
   updateSessionHud({ doing: doingN, hands: handsWorking });
   renderVelocity(data.velocity);
+  renderLastdbVersion(data.lastdbVersion);
 
   // Live indicator — show data age, not just a green light
   if (data.error) {
@@ -1732,11 +1733,180 @@ document.getElementById("btn-theater")?.addEventListener("click", () => {
   showToast(on ? "Theater mode — pipeline takes the stage" : "Back to full floor", 1800);
 });
 
+// ─── LastDB version panel ───────────────────────────────────────────────────
+function shortVer(v) {
+  if (!v) return "–";
+  // Prefer semver-ish head: 0.22.10-canary.… → 0.22.10-canary
+  const m = String(v).match(/^(\d+\.\d+\.\d+(?:-[a-z0-9.]+)?)/i);
+  if (m) return m[1].replace(/\.\d{8}$/, "");
+  return String(v).slice(0, 22);
+}
+
+function renderLastdbVersion(snap) {
+  const chipVer = document.getElementById("lastdb-chip-ver");
+  const btn = document.getElementById("btn-lastdb-version");
+  if (!snap || !snap.running) {
+    if (chipVer) chipVer.textContent = "…";
+    if (btn) btn.title = "LastDB version unavailable";
+    return;
+  }
+  const r = snap.running;
+  const verLabel = shortVer(r.version);
+  const sha = r.sha ? r.sha.slice(0, 9) : "";
+  if (chipVer) chipVer.textContent = sha ? `${verLabel} · ${sha}` : verLabel;
+  if (btn) {
+    btn.title = [
+      r.version || "",
+      sha ? `sha ${sha}` : "",
+      r.venue ? `venue ${r.venue}` : "",
+      snap.aheadOfRunning?.count != null
+        ? `${snap.aheadOfRunning.count} commits on fold tip not in binary`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    btn.classList.toggle("warn", (snap.aheadOfRunning?.count || 0) > 0);
+    btn.classList.toggle("canary", /canary/i.test(r.version || ""));
+  }
+
+  const set = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text || "–";
+  };
+  set("lastdb-daemon", r.daemon?.version || r.version || "–");
+  set("lastdb-cli", r.cli?.version || "–");
+  set("lastdb-sha", r.sha || "–");
+  set(
+    "lastdb-venue",
+    [r.venue, r.dirty ? "dirty" : "", r.pid ? `pid ${r.pid}` : ""].filter(Boolean).join(" · ")
+  );
+  set("lastdb-uptime", r.uptime || "–");
+  set("lastdb-path", r.path || "–");
+
+  const gap = snap.aheadOfRunning || {};
+  set("lastdb-gap-summary", gap.note || "–");
+  set(
+    "lastdb-main-ref",
+    snap.main?.label
+      ? `tip ${snap.main.label}${snap.foldCheckout ? ` · ${snap.foldCheckout}` : ""}`
+      : snap.foldExists === false
+        ? `no fold checkout (${snap.foldCheckout || "?"})`
+        : "–"
+  );
+
+  const fillCommits = (ulId, commits) => {
+    const ul = document.getElementById(ulId);
+    if (!ul) return;
+    ul.innerHTML = "";
+    for (const c of commits || []) {
+      const li = document.createElement("li");
+      li.innerHTML = `<span class="mono">${escapeHtml(c.sha || "")}</span> ${escapeHtml(c.subject || "")}`;
+      ul.appendChild(li);
+    }
+    if (!(commits || []).length && ulId === "lastdb-commits-ahead") {
+      const li = document.createElement("li");
+      li.className = "dim";
+      li.textContent = gap.count === 0 ? "You're current with fold tip." : "No commit lines.";
+      ul.appendChild(li);
+    }
+  };
+  fillCommits("lastdb-commits-ahead", gap.commits);
+
+  const canary = snap.runningAheadOfMain || {};
+  const canaryNote = document.getElementById("lastdb-canary-note");
+  if (canaryNote) {
+    if (canary.count > 0) {
+      canaryNote.hidden = false;
+      canaryNote.textContent = canary.note || `${canary.count} canary-only commit(s)`;
+    } else {
+      canaryNote.hidden = true;
+      canaryNote.textContent = "";
+    }
+  }
+  fillCommits("lastdb-commits-canary", canary.count > 0 ? canary.commits : []);
+
+  const relUl = document.getElementById("lastdb-releases");
+  if (relUl) {
+    relUl.innerHTML = "";
+    for (const rel of snap.releases || []) {
+      const li = document.createElement("li");
+      const badge =
+        rel.isRunning || (rel.inRunning && rel.name && (r.version || "").includes(rel.name.replace(/^v/, "")))
+          ? "running"
+          : rel.inRunning
+            ? "in-binary"
+            : "not-in";
+      li.innerHTML = `<span class="badge ${badge}">${badge === "running" ? "YOU" : badge === "in-binary" ? "in" : "—"}</span>
+        <span class="mono">${escapeHtml(rel.name || "")}</span>
+        <span class="dim">${escapeHtml(rel.date || "")}</span>
+        <span class="mono dim">${escapeHtml((rel.sha || "").slice(0, 9))}</span>`;
+      relUl.appendChild(li);
+    }
+    if (!(snap.releases || []).length) {
+      const li = document.createElement("li");
+      li.className = "dim";
+      li.textContent = "No local tags found";
+      relUl.appendChild(li);
+    }
+  }
+
+  const trailUl = document.getElementById("lastdb-trail");
+  if (trailUl) {
+    trailUl.innerHTML = "";
+    for (const t of snap.upgradeTrail || []) {
+      const li = document.createElement("li");
+      li.innerHTML = `<span class="mono">${escapeHtml(t.label || t.file || "")}</span>
+        <span class="dim">${escapeHtml(t.at || "")}</span>`;
+      trailUl.appendChild(li);
+    }
+    if (!(snap.upgradeTrail || []).length) {
+      const li = document.createElement("li");
+      li.className = "dim";
+      li.textContent = "No bak-pre trail next to binary";
+      trailUl.appendChild(li);
+    }
+  }
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function setLastdbPanelOpen(open) {
+  const panel = document.getElementById("lastdb-panel");
+  const btn = document.getElementById("btn-lastdb-version");
+  if (!panel) return;
+  panel.hidden = !open;
+  panel.classList.toggle("collapsed", !open);
+  btn?.classList.toggle("active", open);
+}
+
+document.getElementById("btn-lastdb-version")?.addEventListener("click", () => {
+  const panel = document.getElementById("lastdb-panel");
+  // hidden attribute: if currently hidden, open; if visible, close
+  const willOpen = panel ? panel.hidden : true;
+  setLastdbPanelOpen(willOpen);
+  if (willOpen) {
+    fetch("/api/lastdb-version?refresh=1", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((snap) => renderLastdbVersion(snap))
+      .catch(() => {});
+  }
+});
+document.getElementById("btn-lastdb-close")?.addEventListener("click", () => {
+  setLastdbPanelOpen(false);
+});
+
 // Keyboard shortcuts
 window.addEventListener("keydown", (e) => {
   if (e.target.matches("input, textarea, [contenteditable]")) return;
   const k = e.key.toLowerCase();
   if (k === "s") document.getElementById("btn-sound")?.click();
+  if (k === "v") document.getElementById("btn-lastdb-version")?.click();
   if (k === "p") document.getElementById("btn-demo")?.click();
   if (k === "f") document.getElementById("btn-theater")?.click();
   if (k === "h") document.getElementById("btn-ambient")?.click();
