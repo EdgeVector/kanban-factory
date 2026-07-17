@@ -14,6 +14,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "public");
 const PORT = Number(process.env.PORT || 4177);
 const POLL_MS = Number(process.env.POLL_MS || 4000);
+const HOME = process.env.HOME || "/Users/tomtang";
+/** Fold monorepo used to resolve commit ranges / release tags for the running binary. */
+const FOLD_CHECKOUT =
+  process.env.FOLD_CHECKOUT || path.join(HOME, "code/edgevector/fold");
+/** Version panel is slower to refresh than the board (git + binaries). */
+const VERSION_TTL_MS = Number(process.env.LASTDB_VERSION_TTL_MS || 60_000);
+const VERSION_COMMIT_LIMIT = 8;
+const VERSION_RELEASE_LIMIT = 6;
 
 const ROUTINE_PERSONAS = {
   "kanban-pickup": {
@@ -576,6 +584,7 @@ let cache = {
   workers: [],
   summary: { counts: {}, blocked: 0, needsHuman: 0, total: 0 },
   velocity: null,
+  lastdbVersion: null,
   error: null,
   refreshing: false,
   lastRefreshMs: 0,
@@ -583,6 +592,334 @@ let cache = {
 
 /** Single-flight refresh so stacked /api/state?refresh=1 calls don't pile on kanban. */
 let refreshPromise = null;
+let versionRefreshPromise = null;
+
+/**
+ * Parse `lastdbd 0.22.10-canary.…-gf3aa966ea-dirty` → { binary, version, sha, dirty }.
+ */
+function parseBinaryVersionLine(line) {
+  const text = String(line || "").trim().split("\n")[0] || "";
+  if (!text) return { binary: "", version: "", sha: "", dirty: false, raw: "" };
+  const parts = text.split(/\s+/);
+  const binary = parts[0] || "";
+  const version = parts.slice(1).join(" ") || parts[0] || "";
+  const shaMatch = version.match(/-g([0-9a-f]{7,40})(?:-dirty)?\b/i);
+  const dirty = /-dirty\b/i.test(version);
+  return {
+    binary,
+    version,
+    sha: shaMatch ? shaMatch[1] : "",
+    dirty,
+    raw: text,
+  };
+}
+
+function detectVenue(binPath) {
+  const p = String(binPath || "");
+  if (!p) return { venue: "unknown", path: "" };
+  if (/Cellar\/lastdb|homebrew.*lastdb/i.test(p)) {
+    return { venue: "brew", path: p };
+  }
+  if (/bin-with-upload-cap|\.lastdb\/current|LASTDB_HOME/i.test(p) || p.includes(`${path.sep}.lastdb${path.sep}`)) {
+    return { venue: "sidebin", path: p };
+  }
+  if (p.includes("target") || p.includes("debug") || p.includes("release")) {
+    return { venue: "dev-build", path: p };
+  }
+  return { venue: "path", path: p };
+}
+
+async function resolveBinaryPath(name) {
+  const which = await run("which", [name], 5000);
+  if (!which.ok || !which.out.trim()) return "";
+  const resolved = which.out.trim().split("\n")[0];
+  try {
+    return fs.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+async function gitFold(args, timeoutMs = 12000) {
+  return run("git", ["-C", FOLD_CHECKOUT, ...args], timeoutMs);
+}
+
+/**
+ * Snapshot of the running Mini binary vs local fold checkout (no network).
+ * Answers: what am I on, what's on main that isn't in my binary, which tags.
+ */
+async function collectLastdbVersion() {
+  const t0 = Date.now();
+  const empty = {
+    ok: false,
+    at: Date.now(),
+    ms: 0,
+    foldCheckout: FOLD_CHECKOUT,
+    foldExists: false,
+    running: {
+      daemon: null,
+      cli: null,
+      version: "",
+      sha: "",
+      dirty: false,
+      venue: "unknown",
+      path: "",
+      uptime: "",
+      pid: null,
+      home: "",
+      socket: "",
+    },
+    main: { ref: "", sha: "", label: "" },
+    aheadOfRunning: { count: 0, commits: [], note: "" },
+    runningAheadOfMain: { count: 0, commits: [], note: "" },
+    releases: [],
+    upgradeTrail: [],
+    error: null,
+  };
+
+  try {
+    const [daemonVer, cliVer, statusRes, daemonPath, cliPath] = await Promise.all([
+      run("lastdbd", ["--version"], 8000),
+      run("lastdb", ["--version"], 8000),
+      run("lastdb", ["status"], 8000),
+      resolveBinaryPath("lastdbd"),
+      resolveBinaryPath("lastdb"),
+    ]);
+
+    const daemon = parseBinaryVersionLine(daemonVer.ok ? daemonVer.out : "");
+    const cli = parseBinaryVersionLine(cliVer.ok ? cliVer.out : "");
+    const venue = detectVenue(daemonPath || cliPath);
+
+    let uptime = "";
+    let pid = null;
+    let home = "";
+    let socket = "";
+    if (statusRes.ok || statusRes.out) {
+      for (const line of statusRes.out.split("\n")) {
+        const t = line.trim();
+        if (/^Uptime:/i.test(t)) uptime = t.replace(/^Uptime:\s*/i, "");
+        if (/^Home:/i.test(t)) home = t.replace(/^Home:\s*/i, "");
+        if (/^Socket:/i.test(t)) socket = t.replace(/^Socket:\s*/i, "");
+        const pm = t.match(/pid\s+(\d+)/i);
+        if (pm) pid = Number(pm[1]);
+      }
+    }
+
+    const runningSha = daemon.sha || cli.sha;
+    const runningVersion = daemon.version || cli.version || "";
+
+    empty.running = {
+      daemon: daemon.raw ? daemon : null,
+      cli: cli.raw ? cli : null,
+      version: runningVersion,
+      sha: runningSha,
+      dirty: Boolean(daemon.dirty || cli.dirty),
+      venue: venue.venue,
+      path: daemonPath || venue.path || "",
+      uptime,
+      pid,
+      home,
+      socket,
+    };
+
+    if (!daemonVer.ok && !cliVer.ok) {
+      empty.error = `lastdbd/lastdb version failed: ${daemonVer.err || cliVer.err || "missing"}`;
+      empty.ms = Date.now() - t0;
+      return empty;
+    }
+
+    const foldExists = fs.existsSync(path.join(FOLD_CHECKOUT, ".git"));
+    empty.foldExists = foldExists;
+    empty.ok = true;
+
+    if (!foldExists) {
+      empty.aheadOfRunning.note = `No fold checkout at ${FOLD_CHECKOUT} (set FOLD_CHECKOUT)`;
+      empty.ms = Date.now() - t0;
+      empty.at = Date.now();
+      return { ...empty, ok: true };
+    }
+
+    // Prefer origin/main, fall back to main
+    let mainRef = "origin/main";
+    let mainShaRes = await gitFold(["rev-parse", "--short=9", "origin/main"]);
+    if (!mainShaRes.ok) {
+      mainRef = "main";
+      mainShaRes = await gitFold(["rev-parse", "--short=9", "main"]);
+    }
+    const mainSha = mainShaRes.ok ? mainShaRes.out.trim() : "";
+    empty.main = {
+      ref: mainRef,
+      sha: mainSha,
+      label: mainSha ? `${mainRef} @ ${mainSha}` : mainRef,
+    };
+
+    if (runningSha) {
+      const resolve = await gitFold(["rev-parse", "--verify", `${runningSha}^{commit}`]);
+      if (!resolve.ok) {
+        empty.aheadOfRunning.note = `Running SHA ${runningSha} not found in ${FOLD_CHECKOUT}`;
+      } else {
+        const countAhead = await gitFold([
+          "rev-list",
+          "--count",
+          `${runningSha}..${mainRef}`,
+        ]);
+        const logAhead = await gitFold([
+          "log",
+          "--format=%h\t%s",
+          `${runningSha}..${mainRef}`,
+          `-n${VERSION_COMMIT_LIMIT}`,
+        ]);
+        const nAhead = countAhead.ok ? Number(countAhead.out.trim()) || 0 : 0;
+        const commitsAhead = (logAhead.ok ? logAhead.out : "")
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .map((l) => {
+            const [h, ...rest] = l.split("\t");
+            return { sha: h, subject: rest.join("\t") };
+          });
+        empty.aheadOfRunning = {
+          count: nAhead,
+          commits: commitsAhead,
+          note:
+            nAhead === 0
+              ? "Running binary includes fold tip (no commits missing)"
+              : `${nAhead} commit(s) on ${mainRef} not in running binary`,
+        };
+
+        const countBehind = await gitFold([
+          "rev-list",
+          "--count",
+          `${mainRef}..${runningSha}`,
+        ]);
+        const logBehind = await gitFold([
+          "log",
+          "--format=%h\t%s",
+          `${mainRef}..${runningSha}`,
+          `-n${VERSION_COMMIT_LIMIT}`,
+        ]);
+        const nBehind = countBehind.ok ? Number(countBehind.out.trim()) || 0 : 0;
+        empty.runningAheadOfMain = {
+          count: nBehind,
+          commits: (logBehind.ok ? logBehind.out : "")
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean)
+            .map((l) => {
+              const [h, ...rest] = l.split("\t");
+              return { sha: h, subject: rest.join("\t") };
+            }),
+          note:
+            nBehind === 0
+              ? ""
+              : `Running is ${nBehind} commit(s) ahead of ${mainRef} (canary-only)`,
+        };
+      }
+    } else {
+      empty.aheadOfRunning.note = "Could not parse -gSHA from lastdbd --version";
+    }
+
+    // Local tags as release list
+    const tagsRes = await gitFold([
+      "tag",
+      "--sort=-creatordate",
+      "--format=%(refname:short)\t%(objectname:short)\t%(creatordate:short)",
+    ]);
+    const tags = (tagsRes.ok ? tagsRes.out : "")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .slice(0, VERSION_RELEASE_LIMIT);
+
+    const releases = [];
+    for (const line of tags) {
+      const [name, tagSha, date] = line.split("\t");
+      if (!name) continue;
+      let inRunning = null;
+      if (runningSha && tagSha) {
+        const anc = await gitFold([
+          "merge-base",
+          "--is-ancestor",
+          tagSha,
+          runningSha,
+        ]);
+        // exit 0 = tag is ancestor of running → release is in binary
+        inRunning = anc.ok;
+      }
+      let isRunningTag = false;
+      if (runningVersion && name && runningVersion.startsWith(name.replace(/^v/, ""))) {
+        isRunningTag = true;
+      }
+      if (runningSha && tagSha && runningSha.startsWith(tagSha)) isRunningTag = true;
+      releases.push({
+        name,
+        sha: tagSha || "",
+        date: date || "",
+        inRunning,
+        isRunning: isRunningTag || Boolean(inRunning && name.includes("canary") && runningVersion.includes(name.replace(/^v/, ""))),
+      });
+    }
+    empty.releases = releases;
+
+    // bak-pre trail next to the live binary
+    const binDir = daemonPath ? path.dirname(daemonPath) : "";
+    const trail = [];
+    if (binDir && fs.existsSync(binDir)) {
+      try {
+        const names = fs
+          .readdirSync(binDir)
+          .filter((n) => n.startsWith("lastdbd.bak-pre-"))
+          .sort()
+          .reverse()
+          .slice(0, 8);
+        for (const n of names) {
+          const m = n.match(
+            /^lastdbd\.bak-pre-(.+?)-(\d{8}T\d{6}Z)$/
+          );
+          trail.push({
+            file: n,
+            label: m ? m[1] : n.replace(/^lastdbd\.bak-pre-/, ""),
+            at: m ? m[2] : "",
+            kind: "bak",
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    empty.upgradeTrail = trail;
+
+    empty.ms = Date.now() - t0;
+    empty.at = Date.now();
+    empty.ok = true;
+    empty.error = null;
+    return empty;
+  } catch (e) {
+    empty.error = String(e);
+    empty.ms = Date.now() - t0;
+    empty.at = Date.now();
+    return empty;
+  }
+}
+
+async function refreshLastdbVersion(force = false) {
+  const fresh =
+    cache.lastdbVersion &&
+    cache.lastdbVersion.at &&
+    Date.now() - cache.lastdbVersion.at < VERSION_TTL_MS;
+  if (!force && fresh) return cache.lastdbVersion;
+  if (versionRefreshPromise) return versionRefreshPromise;
+  versionRefreshPromise = (async () => {
+    try {
+      const snap = await collectLastdbVersion();
+      cache.lastdbVersion = snap;
+      return snap;
+    } finally {
+      versionRefreshPromise = null;
+    }
+  })();
+  return versionRefreshPromise;
+}
 
 async function refresh() {
   if (refreshPromise) return refreshPromise;
@@ -594,9 +931,10 @@ async function refresh() {
       // column (fkanban DEFAULT_COLUMN_LIMIT), which silently under-counts
       // backlog/done and wrecks velocity/heat stats. Bodies stay ~200-char
       // previews either way; we only need full *counts*, not full bodies.
-      const [kanbanRes, brainRes] = await Promise.all([
+      const [kanbanRes, brainRes, versionSnap] = await Promise.all([
         run("kanban", ["list", "--json", "--all"], 45000),
         run("brain", ["get", "routine-heartbeats", "--type", "reference"], 20000),
+        refreshLastdbVersion(false),
       ]);
 
       let cards = cache.cards;
@@ -631,6 +969,7 @@ async function refresh() {
         workers,
         summary,
         velocity,
+        lastdbVersion: versionSnap || cache.lastdbVersion,
         error,
         personas: ROUTINE_PERSONAS,
         lastRefreshMs: Date.now() - t0,
@@ -663,6 +1002,7 @@ function statePayload() {
     workers: cache.workers,
     summary: cache.summary,
     velocity: cache.velocity,
+    lastdbVersion: cache.lastdbVersion,
   };
 }
 
@@ -710,8 +1050,21 @@ const server = http.createServer(async (req, res) => {
         at: cache.at,
         ageMs: cache.at ? Date.now() - cache.at : null,
         refreshing: Boolean(cache.refreshing || refreshPromise),
+        lastdbVersion: cache.lastdbVersion?.running?.version || null,
+        lastdbSha: cache.lastdbVersion?.running?.sha || null,
       })
     );
+    return;
+  }
+
+  if (url.pathname === "/api/lastdb-version") {
+    const force = url.searchParams.get("refresh") === "1";
+    const snap = await refreshLastdbVersion(force);
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    });
+    res.end(JSON.stringify(snap));
     return;
   }
 
