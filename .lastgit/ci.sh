@@ -18,8 +18,11 @@ echo "== node syntax =="
 # Prefer node; fall back to bun when CI scratch lacks node.
 if command -v node >/dev/null 2>&1; then
   node --check server.mjs
+  node --check public/app.js
 elif command -v bun >/dev/null 2>&1; then
   bun --print "await import('./server.mjs')" >/dev/null 2>&1 || bun build server.mjs --target=node --outfile=/dev/null
+  # bun has no --check; syntax-gate app.js via build to /dev/null
+  bun build public/app.js --target=browser --outfile=/dev/null
 else
   echo "no node/bun on PATH" >&2
   exit 1

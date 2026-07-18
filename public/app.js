@@ -1868,14 +1868,6 @@ function renderLastdbVersion(snap) {
   }
 }
 
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function setLastdbPanelOpen(open) {
   const panel = document.getElementById("lastdb-panel");
   const btn = document.getElementById("btn-lastdb-version");
