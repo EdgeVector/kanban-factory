@@ -735,7 +735,16 @@ function ensureCardAskLocal(c) {
 
 function cardTooltipHtml(c) {
   ensureCardAskLocal(c);
+  const since = c.column === "doing" ? workingSinceMs(c) : null;
+  const workAge = since != null ? formatWorkAge(since) : null;
+  const ageBand = since != null ? workAgeBand(since) : null;
   const rows = [
+    workAge
+      ? [
+          ageBand === "stuck" ? "working ⚠" : ageBand === "warn" ? "working · long" : "working",
+          `${workAge}${since ? " · since " + new Date(since).toLocaleString() : ""}`,
+        ]
+      : null,
     c.priority ? ["priority", c.priority] : null,
     c.kind ? ["kind", c.kind] : null,
     c.repo ? ["repo", c.repo] : null,
@@ -893,44 +902,14 @@ function buildCardEl(c) {
 
   const meta = document.createElement("div");
   meta.className = "meta";
-
-  if (c.priority) {
-    const b = document.createElement("span");
-    b.className = `badge pri ${priorityClass(c.priority)}`;
-    b.textContent = c.priority;
-    meta.appendChild(b);
-  }
-  if (c.kind) {
-    const b = document.createElement("span");
-    b.className = "badge kind";
-    b.textContent = c.kind;
-    meta.appendChild(b);
-  }
-  if (c.repo) {
-    const b = document.createElement("span");
-    b.className = "badge repo";
-    b.textContent = c.repo.replace(/^EdgeVector\//, "");
-    meta.appendChild(b);
-  }
-  if (c.assignee && c.column === "doing") {
-    const b = document.createElement("span");
-    b.className = "badge worker";
-    b.textContent = shortWorker(c.assignee);
-    meta.appendChild(b);
-  }
-  if (c.blocked) {
-    const b = document.createElement("span");
-    b.className = "badge block";
-    b.textContent = "blocked";
-    meta.appendChild(b);
-  } else if (c.block_status && c.block_status !== "none") {
-    const b = document.createElement("span");
-    b.className = "badge block";
-    b.textContent = c.block_status;
-    meta.appendChild(b);
-  }
-
+  fillCardMeta(meta, c);
   el.appendChild(meta);
+  // Age band classes for stuck/warn glow
+  if (c.column === "doing") {
+    const band = workAgeBand(workingSinceMs(c));
+    el.classList.toggle("age-warn", band === "warn");
+    el.classList.toggle("age-stuck", band === "stuck");
+  }
   bindTooltip(el, () => cardTooltipHtml(cardMap.get(c.slug) || c), {
     onEnter: () => enrichCardAskOnHover(c.slug, el),
   });
@@ -957,14 +936,21 @@ function applyCardClasses(el, c) {
     "deferred",
     "needs_human",
     "working",
-    "done-pop"
+    "done-pop",
+    "age-warn",
+    "age-stuck"
   );
   const p = priorityClass(c.priority);
   if (p) el.classList.add(p);
   if (c.blocked) el.classList.add("blocked");
   if (c.block_status === "deferred") el.classList.add("deferred");
   if (c.block_status === "needs_human") el.classList.add("needs_human");
-  if (c.column === "doing") el.classList.add("working");
+  if (c.column === "doing") {
+    el.classList.add("working");
+    const band = workAgeBand(workingSinceMs(c));
+    if (band === "warn") el.classList.add("age-warn");
+    if (band === "stuck") el.classList.add("age-stuck");
+  }
   if (c.column === "done") el.classList.add("done-pop");
 }
 
@@ -1151,42 +1137,13 @@ function refreshCardContent(el, c) {
   const title = el.querySelector(".title");
   if (title) title.textContent = c.title;
   const meta = el.querySelector(".meta");
-  if (!meta) return;
-  meta.innerHTML = "";
-  if (c.priority) {
-    const b = document.createElement("span");
-    b.className = `badge pri ${priorityClass(c.priority)}`;
-    b.textContent = c.priority;
-    meta.appendChild(b);
-  }
-  if (c.kind) {
-    const b = document.createElement("span");
-    b.className = "badge kind";
-    b.textContent = c.kind;
-    meta.appendChild(b);
-  }
-  if (c.repo) {
-    const b = document.createElement("span");
-    b.className = "badge repo";
-    b.textContent = c.repo.replace(/^EdgeVector\//, "");
-    meta.appendChild(b);
-  }
-  if (c.assignee && c.column === "doing") {
-    const b = document.createElement("span");
-    b.className = "badge worker";
-    b.textContent = shortWorker(c.assignee);
-    meta.appendChild(b);
-  }
-  if (c.blocked) {
-    const b = document.createElement("span");
-    b.className = "badge block";
-    b.textContent = "blocked";
-    meta.appendChild(b);
-  } else if (c.block_status && c.block_status !== "none") {
-    const b = document.createElement("span");
-    b.className = "badge block";
-    b.textContent = c.block_status;
-    meta.appendChild(b);
+  if (meta) fillCardMeta(meta, c);
+  if (c.column === "doing") {
+    const band = workAgeBand(workingSinceMs(c));
+    el.classList.toggle("age-warn", band === "warn");
+    el.classList.toggle("age-stuck", band === "stuck");
+  } else {
+    el.classList.remove("age-warn", "age-stuck");
   }
 }
 
@@ -1655,6 +1612,137 @@ function formatWhen(iso) {
   }
 }
 
+/**
+ * When a card entered its current column. fkanban sets `position` to Date.now()
+ * on move/claim, so for doing cards that's "actively working since".
+ * Falls back to updated_at if position isn't a plausible epoch-ms.
+ */
+function workingSinceMs(c) {
+  if (!c) return null;
+  const pos = Number(c.position);
+  // ~2001-04 … ~2286-11 in ms
+  if (Number.isFinite(pos) && pos > 1e12 && pos < 1e13) return pos;
+  if (c.updated_at) {
+    const t = Date.parse(c.updated_at);
+    if (Number.isFinite(t)) return t;
+  }
+  if (c.created_at) {
+    const t = Date.parse(c.created_at);
+    if (Number.isFinite(t)) return t;
+  }
+  return null;
+}
+
+/** Compact duration for badges: 45s · 12m · 1h 04m · 2d 3h */
+function formatWorkAge(sinceMs, nowMs = Date.now()) {
+  if (sinceMs == null || !Number.isFinite(sinceMs)) return null;
+  let sec = Math.max(0, Math.floor((nowMs - sinceMs) / 1000));
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  const remM = min % 60;
+  if (h < 48) return remM ? `${h}h ${String(remM).padStart(2, "0")}m` : `${h}h`;
+  const d = Math.floor(h / 24);
+  const remH = h % 24;
+  return remH ? `${d}d ${remH}h` : `${d}d`;
+}
+
+/** Age band for styling: ok | warn (≥30m) | stuck (≥60m). */
+function workAgeBand(sinceMs, nowMs = Date.now()) {
+  if (sinceMs == null) return "ok";
+  const min = (nowMs - sinceMs) / 60000;
+  if (min >= 60) return "stuck";
+  if (min >= 30) return "warn";
+  return "ok";
+}
+
+function fillCardMeta(meta, c) {
+  meta.innerHTML = "";
+  if (c.priority) {
+    const b = document.createElement("span");
+    b.className = `badge pri ${priorityClass(c.priority)}`;
+    b.textContent = c.priority;
+    meta.appendChild(b);
+  }
+  if (c.kind) {
+    const b = document.createElement("span");
+    b.className = "badge kind";
+    b.textContent = c.kind;
+    meta.appendChild(b);
+  }
+  if (c.repo) {
+    const b = document.createElement("span");
+    b.className = "badge repo";
+    b.textContent = c.repo.replace(/^EdgeVector\//, "");
+    meta.appendChild(b);
+  }
+  if (c.assignee && c.column === "doing") {
+    const b = document.createElement("span");
+    b.className = "badge worker";
+    b.textContent = shortWorker(c.assignee);
+    meta.appendChild(b);
+  }
+  if (c.column === "doing") {
+    const since = workingSinceMs(c);
+    const age = formatWorkAge(since);
+    if (age) {
+      const b = document.createElement("span");
+      const band = workAgeBand(since);
+      b.className = `badge age age-${band}`;
+      b.dataset.since = String(since);
+      b.textContent = age;
+      const started = since ? new Date(since).toLocaleString() : "";
+      b.title =
+        band === "stuck"
+          ? `Actively working ${age} (since ${started}) — stuck? consider requeue`
+          : band === "warn"
+            ? `Actively working ${age} (since ${started}) — getting long`
+            : `Actively working ${age} (since ${started})`;
+      meta.appendChild(b);
+    }
+  }
+  if (c.blocked) {
+    const b = document.createElement("span");
+    b.className = "badge block";
+    b.textContent = "blocked";
+    meta.appendChild(b);
+  } else if (c.block_status && c.block_status !== "none") {
+    const b = document.createElement("span");
+    b.className = "badge block";
+    b.textContent = c.block_status;
+    meta.appendChild(b);
+  }
+}
+
+/** Tick age badges on doing cards without a full re-render. */
+function refreshDoingAges() {
+  const now = Date.now();
+  for (const [slug, el] of cardEls) {
+    const c = cardMap.get(slug);
+    if (!c || c.column !== "doing") continue;
+    const badge = el.querySelector(".badge.age");
+    const since = workingSinceMs(c);
+    const age = formatWorkAge(since, now);
+    if (!age) continue;
+    const band = workAgeBand(since, now);
+    if (badge) {
+      badge.textContent = age;
+      badge.className = `badge age age-${band}`;
+      badge.dataset.since = String(since);
+      const started = since ? new Date(since).toLocaleString() : "";
+      badge.title =
+        band === "stuck"
+          ? `Actively working ${age} (since ${started}) — stuck? consider requeue`
+          : band === "warn"
+            ? `Actively working ${age} (since ${started}) — getting long`
+            : `Actively working ${age} (since ${started})`;
+    }
+    el.classList.toggle("age-warn", band === "warn");
+    el.classList.toggle("age-stuck", band === "stuck");
+  }
+}
+
 // ─── Demo parade (uses real cards, fake fly for fun) ────────────────────────
 async function parade() {
   Sound.parade();
@@ -2016,6 +2104,8 @@ updateShift();
 updateSessionHud();
 setInterval(updateShift, 60_000);
 setInterval(() => refreshMomentum(), 15_000);
+// Live "how long in doing" badges (doesn't wait for board poll)
+setInterval(refreshDoingAges, 15_000);
 
 // Hide kbd hint after a while
 setTimeout(() => {

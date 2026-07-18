@@ -835,6 +835,38 @@ body.theater-mode .slot { max-height: 68vh; }
 .badge.pri.p3 { background: #64748b; }
 .badge.kind { color: #c4b5fd; }
 .badge.repo { color: #7dd3fc; max-width: 9rem; }
+.badge.age {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  color: #fdba74;
+  background: rgba(251, 146, 60, 0.12);
+  border: 1px solid rgba(251, 146, 60, 0.35);
+}
+.badge.age.age-warn {
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.16);
+  border-color: rgba(245, 158, 11, 0.45);
+}
+.badge.age.age-stuck {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(248, 113, 113, 0.55);
+  animation: agePulse 1.4s ease-in-out infinite;
+}
+.card.age-warn {
+  border-color: rgba(245, 158, 11, 0.5);
+  box-shadow: 0 0 18px rgba(245, 158, 11, 0.12);
+}
+.card.age-stuck {
+  border-color: rgba(248, 113, 113, 0.65);
+  box-shadow: 0 0 22px rgba(239, 68, 68, 0.22);
+}
+@keyframes agePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
+}
 .badge.worker {
   color: #fdba74;
   border-color: rgba(251,146,60,0.3);
@@ -1228,6 +1260,8 @@ body.theater-mode .slot { max-height: 68vh; }
   opacity: 0.75;
   font-size: 0.68rem;
 }
+.tooltip .row b.working-hot { color: #fbbf24; }
+.tooltip .row b.working-stuck { color: #f87171; }
 .tooltip .vibe {
   margin-top: 8px;
   padding-top: 8px;
