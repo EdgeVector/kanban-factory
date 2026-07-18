@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { extractCardAsk } from "./public/card-ask.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "public");
@@ -289,10 +290,19 @@ function normalizeCards(raw) {
       c.priority ||
       (tags.find((t) => /^p[0-3]$/i.test(t)) || "").toUpperCase() ||
       null;
+    const rawBody = c.body || "";
+    // List previews are short and usually start with agent boilerplate; still
+    // extract what we can. Hover fetches full body via /api/card/:slug.
+    const askBits = extractCardAsk(rawBody);
     return {
       slug: c.slug,
       title: c.title || c.slug,
-      body: (c.body || "").slice(0, 400),
+      body: rawBody.slice(0, 500),
+      ask: askBits.ask,
+      deliverable: askBits.deliverable,
+      summary: askBits.summary,
+      // True when list preview already had GOAL/END STATE (no lazy fetch needed).
+      askReady: Boolean(askBits.ask || askBits.deliverable),
       column: c.column || "backlog",
       position: String(c.position ?? ""),
       assignee: c.assignee || "",
@@ -314,6 +324,50 @@ function normalizeCards(raw) {
       done_at: c.done_at || "",
     };
   });
+}
+
+/** Full-card ask extract (cached briefly so hover spam is cheap). */
+const cardAskCache = new Map(); // slug -> { at, payload }
+const CARD_ASK_TTL_MS = 60_000;
+
+async function fetchCardAsk(slug) {
+  const clean = String(slug || "").trim();
+  if (!clean || !/^[A-Za-z0-9._-]+$/.test(clean)) {
+    return { ok: false, error: "invalid slug" };
+  }
+  const hit = cardAskCache.get(clean);
+  if (hit && Date.now() - hit.at < CARD_ASK_TTL_MS) return hit.payload;
+
+  const res = await run("kanban", ["show", clean, "--json"], 20000);
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: res.err || res.out || `exit ${res.code}`,
+      slug: clean,
+    };
+  }
+  let raw;
+  try {
+    raw = JSON.parse(res.out);
+  } catch (e) {
+    return { ok: false, error: `parse: ${e.message}`, slug: clean };
+  }
+  const body = raw.body || raw.card?.body || "";
+  const title = raw.title || raw.card?.title || clean;
+  const bits = extractCardAsk(body);
+  const payload = {
+    ok: true,
+    slug: clean,
+    title,
+    ask: bits.ask,
+    deliverable: bits.deliverable,
+    summary: bits.summary,
+    askReady: true,
+    // Enough full body for client re-extract if needed; keep payload modest.
+    body: body.slice(0, 4000),
+  };
+  cardAskCache.set(clean, { at: Date.now(), payload });
+  return payload;
 }
 
 function parseHeartbeats(text) {
@@ -1065,6 +1119,18 @@ const server = http.createServer(async (req, res) => {
       "Cache-Control": "no-store",
     });
     res.end(JSON.stringify(snap));
+    return;
+  }
+
+  // GET /api/card/:slug — full body ask/deliverable for hover tooltips
+  const cardMatch = url.pathname.match(/^\/api\/card\/([A-Za-z0-9._-]+)$/);
+  if (cardMatch) {
+    const payload = await fetchCardAsk(cardMatch[1]);
+    res.writeHead(payload.ok ? 200 : 404, {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    });
+    res.end(JSON.stringify(payload));
     return;
   }
 

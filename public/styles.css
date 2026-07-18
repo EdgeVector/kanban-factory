@@ -1162,7 +1162,7 @@ body.theater-mode .slot { max-height: 68vh; }
 .tooltip {
   position: fixed;
   z-index: 100;
-  max-width: min(360px, 90vw);
+  max-width: min(420px, 92vw);
   padding: 12px 14px;
   border-radius: 12px;
   background: rgba(8, 12, 22, 0.95);
@@ -1172,18 +1172,62 @@ body.theater-mode .slot { max-height: 68vh; }
   backdrop-filter: blur(10px);
 }
 .tooltip h3 {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   font-size: 0.92rem;
   line-height: 1.3;
 }
-.tooltip .row {
-  font-size: 0.75rem;
-  color: var(--muted);
-  font-family: var(--mono);
-  margin: 3px 0;
+/* Ask / deliverable first — the reason Tom hovers */
+.tooltip .ask,
+.tooltip .deliverable {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: #e2e8f0;
   word-break: break-word;
 }
-.tooltip .row b { color: #cbd5e1; font-weight: 500; }
+.tooltip .ask {
+  background: rgba(99, 102, 241, 0.14);
+  border: 1px solid rgba(129, 140, 248, 0.28);
+}
+.tooltip .deliverable {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.28);
+}
+.tooltip .ask.loading {
+  color: #94a3b8;
+  font-style: italic;
+}
+.tooltip .ask .lbl,
+.tooltip .deliverable .lbl {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 3px;
+  font-family: var(--mono);
+}
+.tooltip .meta-block {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(148,163,184,0.12);
+}
+.tooltip .row {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  margin: 2px 0;
+  word-break: break-word;
+}
+.tooltip .row b { color: #94a3b8; font-weight: 500; }
+.tooltip .slug-row {
+  margin-top: 4px;
+  opacity: 0.75;
+  font-size: 0.68rem;
+}
 .tooltip .vibe {
   margin-top: 8px;
   padding-top: 8px;

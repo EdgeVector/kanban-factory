@@ -3,6 +3,8 @@
  * Live-polls /api/state, animates card moves, personifies routines.
  */
 
+import { extractCardAsk } from "./card-ask.js";
+
 const COLS = ["backlog", "todo", "doing", "done"];
 // Client polls cache; server refreshes in background. Don't stampede kanban.
 const POLL_MS = 5000;
@@ -10,6 +12,9 @@ const SHORT = (s, n = 48) => {
   if (!s) return "";
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 };
+
+/** In-flight hover enrichments so we don't stampede kanban show. */
+const askFetch = new Map(); // slug -> Promise
 
 // ─── Sound (Web Audio, no assets) ───────────────────────────────────────────
 const Sound = (() => {
@@ -715,36 +720,104 @@ function shortWorker(assignee) {
   return SHORT(assignee.replace(/^last-stack-/, "").replace(/^fkanban-/, ""), 16);
 }
 
+function ensureCardAskLocal(c) {
+  // Prefer server-extracted fields; fall back to client extract on body.
+  if (c.askReady && (c.ask || c.deliverable)) return c;
+  if (c.body && (!c.ask || !c.deliverable)) {
+    const bits = extractCardAsk(c.body);
+    if (bits.ask && !c.ask) c.ask = bits.ask;
+    if (bits.deliverable && !c.deliverable) c.deliverable = bits.deliverable;
+    if (bits.summary && !c.summary) c.summary = bits.summary;
+    if (bits.ask || bits.deliverable) c.askReady = true;
+  }
+  return c;
+}
+
 function cardTooltipHtml(c) {
+  ensureCardAskLocal(c);
   const rows = [
-    ["slug", c.slug],
-    ["column", c.column],
     c.priority ? ["priority", c.priority] : null,
     c.kind ? ["kind", c.kind] : null,
     c.repo ? ["repo", c.repo] : null,
+    c.column ? ["column", c.column] : null,
     c.assignee ? ["assignee", c.assignee] : null,
     c.north_star ? ["north star", c.north_star] : null,
     c.blocked ? ["blocked by", (c.blockedBy || []).join(", ") || "deps"] : null,
     c.block_status && c.block_status !== "none"
-      ? ["hold", `${c.block_status}${c.block_reason ? " — " + c.block_reason : ""}`]
+      ? ["hold", `${c.block_status}${c.block_reason ? " — " + SHORT(c.block_reason, 120) : ""}`]
       : null,
-    c.pr_url ? ["pr", c.pr_url] : null,
-    c.branch ? ["branch", c.branch] : null,
+    c.pr_url ? ["pr", SHORT(c.pr_url, 64)] : null,
   ].filter(Boolean);
+
+  const ask = c.ask || "";
+  const deliverable = c.deliverable || "";
+  const summary = !ask && !deliverable ? c.summary || "" : "";
+  const loading = !c.askReady && !ask && !deliverable && !summary;
+
   return `
     <h3>${escapeHtml(c.title)}</h3>
+    ${
+      ask
+        ? `<div class="ask"><span class="lbl">Ask</span>${escapeHtml(ask)}</div>`
+        : ""
+    }
+    ${
+      deliverable
+        ? `<div class="deliverable"><span class="lbl">Done when</span>${escapeHtml(deliverable)}</div>`
+        : ""
+    }
+    ${
+      summary
+        ? `<div class="ask"><span class="lbl">About</span>${escapeHtml(summary)}</div>`
+        : ""
+    }
+    ${
+      loading
+        ? `<div class="ask loading"><span class="lbl">Ask</span>Loading goal &amp; deliverable…</div>`
+        : ""
+    }
+    <div class="meta-block">
     ${rows
       .map(
         ([k, v]) =>
           `<div class="row"><b>${escapeHtml(k)}:</b> ${escapeHtml(String(v))}</div>`
       )
       .join("")}
-    ${
-      c.body
-        ? `<div class="vibe">${escapeHtml(SHORT(c.body.replace(/\s+/g, " "), 220))}</div>`
-        : ""
-    }
+    </div>
+    <div class="row slug-row"><b>slug:</b> ${escapeHtml(c.slug || "")}</div>
   `;
+}
+
+/** Enrich card ask/deliverable from full body (kanban show) while hovered. */
+function enrichCardAskOnHover(slug, el) {
+  if (!slug) return;
+  const c = cardMap.get(slug);
+  if (!c) return;
+  ensureCardAskLocal(c);
+  if (c.askReady && (c.ask || c.deliverable)) return;
+  if (askFetch.has(slug)) return;
+
+  const p = fetch(`/api/card/${encodeURIComponent(slug)}`)
+    .then((r) => r.json())
+    .then((data) => {
+      askFetch.delete(slug);
+      if (!data || !data.ok) return;
+      const live = cardMap.get(slug) || c;
+      live.ask = data.ask || live.ask;
+      live.deliverable = data.deliverable || live.deliverable;
+      live.summary = data.summary || live.summary;
+      live.askReady = true;
+      if (data.body) live.body = data.body;
+      cardMap.set(slug, live);
+      // Refresh tooltip only if still hovering this card
+      if (el && el.matches(":hover") && !tooltip.hidden) {
+        tooltip.innerHTML = cardTooltipHtml(live);
+      }
+    })
+    .catch(() => {
+      askFetch.delete(slug);
+    });
+  askFetch.set(slug, p);
 }
 
 function routineTooltipHtml(r) {
@@ -770,11 +843,12 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
-function bindTooltip(el, htmlFn) {
+function bindTooltip(el, htmlFn, opts = {}) {
   el.addEventListener("pointerenter", (e) => {
     tooltip.innerHTML = htmlFn();
     tooltip.hidden = false;
     placeTooltip(e.clientX, e.clientY);
+    if (typeof opts.onEnter === "function") opts.onEnter(el);
   });
   el.addEventListener("pointermove", (e) => placeTooltip(e.clientX, e.clientY));
   el.addEventListener("pointerleave", () => {
@@ -857,7 +931,9 @@ function buildCardEl(c) {
   }
 
   el.appendChild(meta);
-  bindTooltip(el, () => cardTooltipHtml(cardMap.get(c.slug) || c));
+  bindTooltip(el, () => cardTooltipHtml(cardMap.get(c.slug) || c), {
+    onEnter: () => enrichCardAskOnHover(c.slug, el),
+  });
   el.addEventListener("click", (e) => {
     if (e.target.closest("a")) return;
     const r = rectCenter(el);
