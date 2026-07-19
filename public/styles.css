@@ -855,6 +855,21 @@ body.theater-mode .slot { max-height: 68vh; }
   border-color: rgba(248, 113, 113, 0.55);
   animation: agePulse 1.4s ease-in-out infinite;
 }
+.badge.age.age-backlog {
+  color: #94a3b8;
+  background: rgba(100, 116, 139, 0.14);
+  border-color: rgba(148, 163, 184, 0.3);
+}
+.badge.age.age-todo {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(96, 165, 250, 0.35);
+}
+.badge.age.age-done {
+  color: #6ee7b7;
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.35);
+}
 .card.age-warn {
   border-color: rgba(245, 158, 11, 0.5);
   box-shadow: 0 0 18px rgba(245, 158, 11, 0.12);
