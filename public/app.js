@@ -735,15 +735,29 @@ function ensureCardAskLocal(c) {
 
 function cardTooltipHtml(c) {
   ensureCardAskLocal(c);
-  const since = c.column === "doing" ? workingSinceMs(c) : null;
+  const since = columnEnteredMs(c);
   const workAge = since != null ? formatWorkAge(since) : null;
-  const ageBand = since != null ? workAgeBand(since) : null;
-  const rows = [
-    workAge
+  const ageBand = c.column === "doing" && since != null ? workAgeBand(since) : null;
+  const sinceLabel = since != null ? new Date(since).toLocaleString() : "";
+  const enteredRow = !workAge
+    ? null
+    : c.column === "doing"
       ? [
           ageBand === "stuck" ? "working ⚠" : ageBand === "warn" ? "working · long" : "working",
-          `${workAge}${since ? " · since " + new Date(since).toLocaleString() : ""}`,
+          `${workAge} · since ${sinceLabel}`,
         ]
+      : c.column === "backlog"
+        ? ["in backlog", `${workAge} · since ${sinceLabel}`]
+        : c.column === "todo"
+          ? ["queued", `${workAge} · in todo since ${sinceLabel}`]
+          : c.column === "done"
+            ? ["completed", `${sinceLabel} · ${workAge} ago`]
+            : [`in ${c.column}`, `${workAge} · since ${sinceLabel}`];
+  const createdMs = c.created_at ? Date.parse(c.created_at) : NaN;
+  const rows = [
+    enteredRow,
+    Number.isFinite(createdMs)
+      ? ["created", `${new Date(createdMs).toLocaleString()} · ${formatWorkAge(createdMs)} ago`]
       : null,
     c.priority ? ["priority", c.priority] : null,
     c.kind ? ["kind", c.kind] : null,
@@ -1657,6 +1671,66 @@ function workAgeBand(sinceMs, nowMs = Date.now()) {
   return "ok";
 }
 
+/**
+ * When a card entered its current column — works for every column, same
+ * position-is-move-time trick as workingSinceMs. Done cards prefer a real
+ * done_at when the board recorded one.
+ */
+function columnEnteredMs(c) {
+  if (!c) return null;
+  if (c.column === "done" && c.done_at) {
+    const t = Date.parse(c.done_at);
+    if (Number.isFinite(t)) return t;
+  }
+  return workingSinceMs(c);
+}
+
+/** Badge class/text/title for a card's column-entry age. */
+function ageBadgeInfo(c, since, nowMs = Date.now()) {
+  const age = formatWorkAge(since, nowMs);
+  if (!age) return null;
+  const when = new Date(since).toLocaleString();
+  switch (c.column) {
+    case "doing": {
+      const band = workAgeBand(since, nowMs);
+      return {
+        cls: `badge age age-${band}`,
+        text: age,
+        title:
+          band === "stuck"
+            ? `Actively working ${age} (since ${when}) — stuck? consider requeue`
+            : band === "warn"
+              ? `Actively working ${age} (since ${when}) — getting long`
+              : `Actively working ${age} (since ${when})`,
+      };
+    }
+    case "backlog":
+      return {
+        cls: "badge age age-backlog",
+        text: age,
+        title: `In backlog ${age} (since ${when})`,
+      };
+    case "todo":
+      return {
+        cls: "badge age age-todo",
+        text: age,
+        title: `Queued ${age} (in todo since ${when})`,
+      };
+    case "done":
+      return {
+        cls: "badge age age-done",
+        text: `✓ ${age}`,
+        title: `Completed ${when} (${age} ago)`,
+      };
+    default:
+      return {
+        cls: "badge age",
+        text: age,
+        title: `In ${c.column} ${age} (since ${when})`,
+      };
+  }
+}
+
 function fillCardMeta(meta, c) {
   meta.innerHTML = "";
   if (c.priority) {
@@ -1683,22 +1757,15 @@ function fillCardMeta(meta, c) {
     b.textContent = shortWorker(c.assignee);
     meta.appendChild(b);
   }
-  if (c.column === "doing") {
-    const since = workingSinceMs(c);
-    const age = formatWorkAge(since);
-    if (age) {
+  {
+    const since = columnEnteredMs(c);
+    const info = since != null ? ageBadgeInfo(c, since) : null;
+    if (info) {
       const b = document.createElement("span");
-      const band = workAgeBand(since);
-      b.className = `badge age age-${band}`;
+      b.className = info.cls;
       b.dataset.since = String(since);
-      b.textContent = age;
-      const started = since ? new Date(since).toLocaleString() : "";
-      b.title =
-        band === "stuck"
-          ? `Actively working ${age} (since ${started}) — stuck? consider requeue`
-          : band === "warn"
-            ? `Actively working ${age} (since ${started}) — getting long`
-            : `Actively working ${age} (since ${started})`;
+      b.textContent = info.text;
+      b.title = info.title;
       meta.appendChild(b);
     }
   }
@@ -1715,31 +1782,28 @@ function fillCardMeta(meta, c) {
   }
 }
 
-/** Tick age badges on doing cards without a full re-render. */
-function refreshDoingAges() {
+/** Tick column-age badges on all cards without a full re-render. */
+function refreshCardAges() {
   const now = Date.now();
   for (const [slug, el] of cardEls) {
     const c = cardMap.get(slug);
-    if (!c || c.column !== "doing") continue;
+    if (!c) continue;
     const badge = el.querySelector(".badge.age");
-    const since = workingSinceMs(c);
-    const age = formatWorkAge(since, now);
-    if (!age) continue;
-    const band = workAgeBand(since, now);
-    if (badge) {
-      badge.textContent = age;
-      badge.className = `badge age age-${band}`;
+    const since = columnEnteredMs(c);
+    const info = since != null ? ageBadgeInfo(c, since, now) : null;
+    if (badge && info) {
+      badge.textContent = info.text;
+      badge.className = info.cls;
       badge.dataset.since = String(since);
-      const started = since ? new Date(since).toLocaleString() : "";
-      badge.title =
-        band === "stuck"
-          ? `Actively working ${age} (since ${started}) — stuck? consider requeue`
-          : band === "warn"
-            ? `Actively working ${age} (since ${started}) — getting long`
-            : `Actively working ${age} (since ${started})`;
+      badge.title = info.title;
     }
-    el.classList.toggle("age-warn", band === "warn");
-    el.classList.toggle("age-stuck", band === "stuck");
+    if (c.column === "doing") {
+      const band = workAgeBand(since, now);
+      el.classList.toggle("age-warn", band === "warn");
+      el.classList.toggle("age-stuck", band === "stuck");
+    } else {
+      el.classList.remove("age-warn", "age-stuck");
+    }
   }
 }
 
@@ -2105,7 +2169,7 @@ updateSessionHud();
 setInterval(updateShift, 60_000);
 setInterval(() => refreshMomentum(), 15_000);
 // Live "how long in doing" badges (doesn't wait for board poll)
-setInterval(refreshDoingAges, 15_000);
+setInterval(refreshCardAges, 15_000);
 
 // Hide kbd hint after a while
 setTimeout(() => {
