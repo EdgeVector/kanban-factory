@@ -1283,7 +1283,7 @@ async function applyState(data) {
       }
     }
     // Cap done display for visual density (still real data; keep newest)
-    trimDoneVisual(18);
+    trimDoneVisual(8);
     ensureEmptyHints();
     seedTickerFromBoard(cards, data.workers || []);
     // routines map filled below — seed feed after routines registered
@@ -1373,7 +1373,7 @@ async function applyState(data) {
       updateSessionHud();
     }
 
-    trimDoneVisual(18);
+    trimDoneVisual(8);
     ensureEmptyHints();
   }
 
@@ -1397,47 +1397,60 @@ async function applyState(data) {
   processEvents(data.events || []);
 }
 
+function handLoad(w) {
+  return w.load || (w.carryingAll || []).length || (w.carrying ? 1 : 0) || (w.status === "working" ? 1 : 0);
+}
+
 function renderHands(workers, cards) {
   if (!handsEl) return;
   const bySlug = new Map(cards.map((c) => [c.slug, c]));
-  // Prefer overloaded / working hands first
-  const list = [...workers].sort((a, b) => {
-    const la = a.load || (a.carryingAll || []).length || (a.status === "working" ? 1 : 0);
-    const lb = b.load || (b.carryingAll || []).length || (b.status === "working" ? 1 : 0);
+  const sorted = [...workers].sort((a, b) => {
+    const la = handLoad(a);
+    const lb = handLoad(b);
     return lb - la || a.label.localeCompare(b.label);
   });
+  // Compact: only show workers carrying something (idle hands hide)
+  const list = sorted.filter((w) => handLoad(w) > 0);
+  const idleN = sorted.length - list.length;
+  const summary = document.getElementById("hands-summary");
+  if (summary) {
+    summary.textContent = list.length
+      ? `${list.length} working · ${idleN} idle hidden`
+      : sorted.length
+        ? `0 working · ${idleN} idle`
+        : "no workers";
+  }
 
-  if (!list.length) {
+  if (!sorted.length) {
     handsPanel.style.display = "none";
     return;
   }
   handsPanel.style.display = "";
   handsEl.innerHTML = "";
 
+  if (!list.length) {
+    const empty = document.createElement("div");
+    empty.className = "hand hand-empty";
+    empty.textContent = "no hands on cards";
+    handsEl.appendChild(empty);
+    return;
+  }
+
   for (const w of list) {
-    const load = w.load || (w.carryingAll || []).length || (w.carrying ? 1 : 0);
+    const load = handLoad(w);
     const titles = w.carryingTitles || [];
     const card = w.carrying ? bySlug.get(w.carrying) : null;
     const primaryTitle =
-      titles[0] || (card ? card.title : w.carrying) || "waiting for pickup";
+      titles[0] || (card ? card.title : w.carrying) || "working";
     const el = document.createElement("div");
     const overloaded = load >= 3;
-    el.className = `hand ${load > 0 ? "working" : "idle"}${overloaded ? " overloaded" : ""}`;
-    const taskText =
-      load > 1
-        ? `${SHORT(primaryTitle, 34)} +${load - 1} more`
-        : load > 0
-          ? SHORT(primaryTitle, 42)
-          : "waiting for pickup";
+    el.className = `hand chip-hand working${overloaded ? " overloaded" : ""}`;
+    el.title = `${w.label}: ${primaryTitle}${load > 1 ? ` (+${load - 1})` : ""}`;
     el.innerHTML = `
-      <div class="hand-avatar">${escapeHtml(w.emoji || "🦾")}</div>
-      <div class="hand-body">
-        <p class="hand-name">${escapeHtml(w.label)}${
-          load > 1 ? `<span class="hand-load" title="${load} cards">×${load}</span>` : ""
-        }</p>
-        <p class="hand-task">${escapeHtml(taskText)}</p>
-      </div>
-      ${load > 0 ? `<div class="hand-grip" title="carrying ${load}">📦</div>` : ""}
+      <span class="hand-avatar">${escapeHtml(w.emoji || "🦾")}</span>
+      <span class="hand-name">${escapeHtml(w.label)}</span>
+      ${load > 1 ? `<span class="hand-load">×${load}</span>` : ""}
+      <span class="hand-task">${escapeHtml(SHORT(primaryTitle, 28))}</span>
     `;
     bindTooltip(el, () => {
       const lines = [
@@ -1465,7 +1478,7 @@ function renderHands(workers, cards) {
         el.dataset.stackIdx = String(idx + 1);
         const cardEl = cardEls.get(slug);
         if (!cardEl) return;
-        cardEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        cardEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
         cardEl.style.outline = "2px solid #fe8019";
         setTimeout(() => {
           cardEl.style.outline = "";
