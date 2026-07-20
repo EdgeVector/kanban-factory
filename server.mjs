@@ -23,6 +23,11 @@ const FOLD_CHECKOUT =
 const VERSION_TTL_MS = Number(process.env.LASTDB_VERSION_TTL_MS || 60_000);
 const VERSION_COMMIT_LIMIT = 8;
 const VERSION_RELEASE_LIMIT = 6;
+/** Named fleet profiles under ~/.routines/profiles (normal | low-credit | …). */
+const ROUTINES_HOME = process.env.ROUTINES_HOME || path.join(HOME, ".routines");
+const ROUTINES_PROFILES_DIR = path.join(ROUTINES_HOME, "profiles");
+const ROUTINES_REGISTRY_DIR = path.join(ROUTINES_HOME, "registry");
+const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 const ROUTINE_PERSONAS = {
   "kanban-pickup": {
@@ -630,6 +635,156 @@ function computeVelocity(cards) {
   };
 }
 
+/** Count status = "active"|"paused" across a registry dir of TOMLs. */
+function countRegistryStatuses(dir) {
+  const out = { active: 0, paused: 0, total: 0 };
+  if (!fs.existsSync(dir)) return out;
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith(".toml")) continue;
+    out.total++;
+    try {
+      const text = fs.readFileSync(path.join(dir, name), "utf8");
+      const m = text.match(/^status\s*=\s*"([^"]+)"/m);
+      if (m?.[1] === "active") out.active++;
+      else if (m?.[1] === "paused") out.paused++;
+    } catch {
+      /* skip unreadable */
+    }
+  }
+  return out;
+}
+
+function readProfileMeta(profileDir) {
+  const metaPath = path.join(profileDir, "PROFILE.toml");
+  let title = path.basename(profileDir);
+  let description = "";
+  if (fs.existsSync(metaPath)) {
+    try {
+      const text = fs.readFileSync(metaPath, "utf8");
+      const t = text.match(/^title\s*=\s*"([^"]*)"/m);
+      if (t) title = t[1];
+      // description may be multiline """…"""
+      const d1 = text.match(/^description\s*=\s*"""([\s\S]*?)"""/m);
+      const d2 = text.match(/^description\s*=\s*"([^"]*)"/m);
+      if (d1) description = d1[1].trim().replace(/\s+/g, " ").slice(0, 280);
+      else if (d2) description = d2[1];
+    } catch {
+      /* ignore */
+    }
+  }
+  return { title, description };
+}
+
+/**
+ * Live fleet profile state for the UI.
+ * active = marker in profiles/ACTIVE (best-effort); live counts from registry.
+ */
+function readRoutinesProfile() {
+  let active = null;
+  const activeFile = path.join(ROUTINES_PROFILES_DIR, "ACTIVE");
+  try {
+    if (fs.existsSync(activeFile)) {
+      active = fs.readFileSync(activeFile, "utf8").trim() || null;
+    }
+  } catch {
+    active = null;
+  }
+
+  const live = countRegistryStatuses(ROUTINES_REGISTRY_DIR);
+  const profiles = [];
+  if (fs.existsSync(ROUTINES_PROFILES_DIR)) {
+    for (const name of fs.readdirSync(ROUTINES_PROFILES_DIR)) {
+      if (name.startsWith("_") || name === "ACTIVE" || name.endsWith(".md")) continue;
+      const dir = path.join(ROUTINES_PROFILES_DIR, name);
+      const reg = path.join(dir, "registry");
+      if (!fs.existsSync(reg) || !fs.statSync(dir).isDirectory()) continue;
+      const meta = readProfileMeta(dir);
+      const counts = countRegistryStatuses(reg);
+      profiles.push({
+        id: name,
+        title: meta.title,
+        description: meta.description,
+        activeCount: counts.active,
+        pausedCount: counts.paused,
+        total: counts.total,
+        isActive: active === name,
+      });
+    }
+  }
+  profiles.sort((a, b) => {
+    // prefer normal, low-credit, then alpha; hide deep autosaves (already skipped _)
+    const order = { normal: 0, "low-credit": 1 };
+    const ao = order[a.id] ?? 50;
+    const bo = order[b.id] ?? 50;
+    if (ao !== bo) return ao - bo;
+    return a.id.localeCompare(b.id);
+  });
+
+  const mode =
+    active === "low-credit"
+      ? "low-credit"
+      : active === "normal"
+        ? "normal"
+        : active || (live.active <= 8 ? "low-credit?" : "unknown");
+
+  return {
+    ok: true,
+    active,
+    mode,
+    live,
+    profiles,
+    profilesDir: ROUTINES_PROFILES_DIR,
+  };
+}
+
+function applyRoutinesProfile(name) {
+  return new Promise((resolve) => {
+    if (!PROFILE_NAME_RE.test(name) || name.startsWith("_")) {
+      resolve({ ok: false, error: `invalid profile name: ${name}` });
+      return;
+    }
+    const profileDir = path.join(ROUTINES_PROFILES_DIR, name, "registry");
+    if (!fs.existsSync(profileDir)) {
+      resolve({ ok: false, error: `unknown profile: ${name}` });
+      return;
+    }
+    const bin =
+      process.env.ROUTINES_PROFILE_BIN ||
+      path.join(ROUTINES_HOME, "bin", "routines-profile");
+    const fallback = path.join(HOME, ".local/bin/routines-profile");
+    const cmd = fs.existsSync(bin) ? bin : fs.existsSync(fallback) ? fallback : "routines-profile";
+    const child = spawn(cmd, ["apply", name], {
+      env: { ...process.env, HOME, PATH: process.env.PATH || "/usr/bin:/bin" },
+      timeout: 30_000,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (d) => {
+      stdout += d;
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += d;
+    });
+    child.on("error", (e) => {
+      resolve({ ok: false, error: String(e.message || e), stdout, stderr });
+    });
+    child.on("close", (code) => {
+      const profile = readRoutinesProfile();
+      if (code === 0) {
+        resolve({ ok: true, applied: name, stdout: stdout.trim(), profile });
+      } else {
+        resolve({
+          ok: false,
+          error: `routines-profile apply exited ${code}`,
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+          profile,
+        });
+      }
+    });
+  });
+}
+
 let cache = {
   at: 0,
   cards: [],
@@ -639,6 +794,7 @@ let cache = {
   summary: { counts: {}, blocked: 0, needsHuman: 0, total: 0 },
   velocity: null,
   lastdbVersion: null,
+  routinesProfile: null,
   error: null,
   refreshing: false,
   lastRefreshMs: 0,
@@ -1014,6 +1170,20 @@ async function refresh() {
       const summary = summarize(cards);
       const velocity = computeVelocity(cards);
 
+      let routinesProfile = cache.routinesProfile;
+      try {
+        routinesProfile = readRoutinesProfile();
+      } catch (e) {
+        routinesProfile = {
+          ok: false,
+          error: String(e?.message || e),
+          active: null,
+          mode: "unknown",
+          live: { active: 0, paused: 0, total: 0 },
+          profiles: [],
+        };
+      }
+
       cache = {
         ...cache,
         at: Date.now(),
@@ -1024,6 +1194,7 @@ async function refresh() {
         summary,
         velocity,
         lastdbVersion: versionSnap || cache.lastdbVersion,
+        routinesProfile,
         error,
         personas: ROUTINE_PERSONAS,
         lastRefreshMs: Date.now() - t0,
@@ -1057,6 +1228,7 @@ function statePayload() {
     summary: cache.summary,
     velocity: cache.velocity,
     lastdbVersion: cache.lastdbVersion,
+    routinesProfile: cache.routinesProfile,
   };
 }
 
@@ -1119,6 +1291,45 @@ const server = http.createServer(async (req, res) => {
       "Cache-Control": "no-store",
     });
     res.end(JSON.stringify(snap));
+    return;
+  }
+
+  // GET/POST /api/routines-profile — fleet mode (normal | low-credit | …)
+  // POST is a deliberate local mutation (localhost-only server).
+  if (url.pathname === "/api/routines-profile") {
+    if (req.method === "GET") {
+      const profile = readRoutinesProfile();
+      cache.routinesProfile = profile;
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      });
+      res.end(JSON.stringify(profile));
+      return;
+    }
+    if (req.method === "POST") {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      let body = {};
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "invalid JSON body" }));
+        return;
+      }
+      const name = String(body.profile || body.name || "").trim();
+      const result = await applyRoutinesProfile(name);
+      if (result.ok && result.profile) cache.routinesProfile = result.profile;
+      res.writeHead(result.ok ? 200 : 400, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      });
+      res.end(JSON.stringify(result));
+      return;
+    }
+    res.writeHead(405, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "method not allowed" }));
     return;
   }
 

@@ -309,6 +309,134 @@ body.theater-mode .slot { max-height: 68vh; }
   background: rgba(96, 165, 250, 0.18);
   border-color: rgba(96, 165, 250, 0.55);
 }
+
+/* Routines fleet mode chip + panel */
+.chip.fleet-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
+.chip.fleet-mode-chip .fleet-mode-label {
+  opacity: 0.7;
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.chip.fleet-mode-chip .fleet-mode-ver {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip.fleet-mode-chip.mode-low {
+  border-color: rgba(251, 191, 36, 0.55);
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.12);
+  color: #fde68a;
+}
+.chip.fleet-mode-chip.mode-normal {
+  border-color: rgba(52, 211, 153, 0.45);
+  color: #a7f3d0;
+}
+.chip.fleet-mode-chip.active {
+  background: rgba(251, 191, 36, 0.14);
+  border-color: rgba(251, 191, 36, 0.55);
+}
+.fleet-mode-panel {
+  position: relative;
+  z-index: 10;
+  margin: 0 24px 12px;
+  padding: 12px 14px 14px;
+  border-radius: var(--radius);
+  background: var(--glass);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+}
+.fleet-mode-panel[hidden] {
+  display: none !important;
+}
+.fleet-mode-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+.fleet-mode-live {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+.fleet-mode-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.fleet-mode-card {
+  text-align: left;
+  padding: 12px 12px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.45);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 0.15s ease, transform 0.12s ease, background 0.15s ease;
+}
+.fleet-mode-card:hover:not(:disabled) {
+  border-color: rgba(148, 163, 184, 0.45);
+  transform: translateY(-1px);
+}
+.fleet-mode-card:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.fleet-mode-card.current {
+  border-color: rgba(52, 211, 153, 0.55);
+  background: rgba(16, 185, 129, 0.08);
+}
+.fleet-mode-card.low-credit {
+  border-color: rgba(251, 191, 36, 0.4);
+}
+.fleet-mode-card .fm-id {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 600;
+}
+.fleet-mode-card .fm-title {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.fleet-mode-card .fm-counts {
+  margin-top: 6px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  opacity: 0.75;
+}
+.fleet-mode-card .fm-desc {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  opacity: 0.7;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.fleet-mode-card .fm-action {
+  margin-top: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+.fleet-mode-msg {
+  min-height: 1.2em;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
 .lastdb-panel {
   position: relative;
   z-index: 10;

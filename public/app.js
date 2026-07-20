@@ -1253,6 +1253,7 @@ async function applyState(data) {
   updateSessionHud({ doing: doingN, hands: handsWorking });
   renderVelocity(data.velocity);
   renderLastdbVersion(data.lastdbVersion);
+  renderFleetMode(data.routinesProfile);
 
   // Live indicator — show data age, not just a green light
   if (data.error) {
@@ -2121,12 +2122,141 @@ document.getElementById("btn-lastdb-close")?.addEventListener("click", () => {
   setLastdbPanelOpen(false);
 });
 
+// ── Routines fleet mode (normal / low-credit) ─────────────────────────────
+let fleetModeApplying = false;
+
+function renderFleetMode(profile) {
+  const chipVer = document.getElementById("fleet-mode-ver");
+  const btn = document.getElementById("btn-fleet-mode");
+  const liveEl = document.getElementById("fleet-mode-live");
+  const listEl = document.getElementById("fleet-mode-list");
+  if (!profile || profile.ok === false) {
+    if (chipVer) chipVer.textContent = "—";
+    btn?.classList.remove("mode-low", "mode-normal");
+    if (liveEl) liveEl.textContent = profile?.error || "profile unavailable";
+    return;
+  }
+  const mode = profile.mode || profile.active || "unknown";
+  const live = profile.live || {};
+  if (chipVer) {
+    chipVer.textContent =
+      live.active != null ? `${mode} · ${live.active} on` : String(mode);
+  }
+  btn?.classList.toggle("mode-low", String(mode).includes("low-credit"));
+  btn?.classList.toggle("mode-normal", mode === "normal");
+  btn?.setAttribute(
+    "title",
+    `Routines fleet mode: ${mode} (${live.active ?? "?"} active / ${live.paused ?? "?"} paused). Click to switch (M).`
+  );
+  if (liveEl) {
+    liveEl.textContent = `marker=${profile.active || "—"} · live registry active=${live.active ?? "?"} paused=${live.paused ?? "?"} total=${live.total ?? "?"}`;
+  }
+  if (!listEl) return;
+  const profiles = profile.profiles || [];
+  listEl.innerHTML = "";
+  if (!profiles.length) {
+    listEl.innerHTML = `<p class="dim">No profiles under ~/.routines/profiles</p>`;
+    return;
+  }
+  for (const p of profiles) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className =
+      "fleet-mode-card" +
+      (p.isActive || p.id === profile.active ? " current" : "") +
+      (p.id === "low-credit" ? " low-credit" : "");
+    card.disabled = fleetModeApplying;
+    const action =
+      p.isActive || p.id === profile.active
+        ? "Current mode"
+        : p.id === "low-credit"
+          ? "Switch → ship-only"
+          : p.id === "normal"
+            ? "Switch → full fleet"
+            : `Apply ${p.id}`;
+    card.innerHTML = `
+      <div class="fm-id">${escapeHtml(p.id)}</div>
+      <div class="fm-title">${escapeHtml(p.title || p.id)}</div>
+      <div class="fm-counts">${p.activeCount ?? "?"} active · ${p.pausedCount ?? "?"} paused</div>
+      <div class="fm-desc">${escapeHtml(p.description || "")}</div>
+      <div class="fm-action">${escapeHtml(action)}</div>`;
+    card.addEventListener("click", () => {
+      if (p.isActive || p.id === profile.active) return;
+      applyFleetMode(p.id);
+    });
+    listEl.appendChild(card);
+  }
+}
+
+function setFleetModePanelOpen(open) {
+  const panel = document.getElementById("fleet-mode-panel");
+  const btn = document.getElementById("btn-fleet-mode");
+  if (!panel) return;
+  panel.hidden = !open;
+  panel.classList.toggle("collapsed", !open);
+  btn?.classList.toggle("active", open);
+  if (open) setLastdbPanelOpen(false);
+}
+
+async function applyFleetMode(name) {
+  const msg = document.getElementById("fleet-mode-msg");
+  if (fleetModeApplying) return;
+  if (
+    !window.confirm(
+      `Switch routines fleet to "${name}"?\n\nThis pauses/resumes scheduled routines via routines-profile apply.`
+    )
+  ) {
+    return;
+  }
+  fleetModeApplying = true;
+  if (msg) msg.textContent = `Applying ${name}…`;
+  try {
+    const res = await fetch("/api/routines-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: name }),
+    });
+    const data = await res.json();
+    if (msg) {
+      msg.textContent = data.ok
+        ? `Applied ${name}` +
+          (data.profile?.live ? ` · ${data.profile.live.active} active` : "")
+        : `Failed: ${data.error || res.status}`;
+    }
+    if (data.profile) renderFleetMode(data.profile);
+  } catch (e) {
+    if (msg) msg.textContent = `Failed: ${e.message || e}`;
+  } finally {
+    fleetModeApplying = false;
+    fetch("/api/routines-profile", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((p) => renderFleetMode(p))
+      .catch(() => {});
+  }
+}
+
+document.getElementById("btn-fleet-mode")?.addEventListener("click", () => {
+  const panel = document.getElementById("fleet-mode-panel");
+  const willOpen = panel ? panel.hidden : true;
+  setFleetModePanelOpen(willOpen);
+  if (willOpen) {
+    fetch("/api/routines-profile", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((p) => renderFleetMode(p))
+      .catch(() => {});
+  }
+});
+document.getElementById("btn-fleet-mode-close")?.addEventListener("click", () => {
+  setFleetModePanelOpen(false);
+});
+
 // Keyboard shortcuts
 window.addEventListener("keydown", (e) => {
   if (e.target.matches("input, textarea, [contenteditable]")) return;
   const k = e.key.toLowerCase();
   if (k === "s") document.getElementById("btn-sound")?.click();
   if (k === "v") document.getElementById("btn-lastdb-version")?.click();
+  if (k === "m") document.getElementById("btn-fleet-mode")?.click();
   if (k === "p") document.getElementById("btn-demo")?.click();
   if (k === "f") document.getElementById("btn-theater")?.click();
   if (k === "h") document.getElementById("btn-ambient")?.click();

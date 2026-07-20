@@ -42,7 +42,16 @@ node server.mjs
 | Routine activity | `brain get routine-heartbeats --type reference` |
 | LastDB version panel | `lastdbd`/`lastdb --version` + `lastdb status` + local `git` against `FOLD_CHECKOUT` (default `~/code/edgevector/fold`) |
 
-Nothing is written to the board or brain. Version panel is read-only (no upgrades).
+Board/brain scrapes are read-only. Version panel is read-only (no upgrades).
+
+**One local mutation:** fleet mode switching via `routines-profile apply`:
+
+| Endpoint | Effect |
+|---|---|
+| `GET /api/routines-profile` | Current mode + available profiles |
+| `POST /api/routines-profile` `{"profile":"low-credit"}` | Apply named profile (autosaves live first) |
+
+UI: top-bar **Fleet** chip — click (or press **M**) for the mode panel.
 
 ### LastDB version panel
 
