@@ -164,7 +164,7 @@ const Fx = (() => {
   window.addEventListener("resize", resize);
   resize();
 
-  const burst = (x, y, color = "#fb923c", n = 18) => {
+  const burst = (x, y, color = "#fe8019", n = 18) => {
     for (let i = 0; i < n; i++) {
       const a = (Math.PI * 2 * i) / n + Math.random() * 0.4;
       const sp = 1.5 + Math.random() * 3.5;
@@ -182,7 +182,7 @@ const Fx = (() => {
   };
 
   const celebrate = (x, y, mega = false) => {
-    const colors = ["#34d399", "#60a5fa", "#fbbf24", "#f472b6", "#a78bfa"];
+    const colors = ["#b8bb26", "#83a598", "#fabd2f", "#fe8019", "#8ec07c", "#fb4934"];
     const n = mega ? 72 : 36;
     for (let i = 0; i < n; i++) {
       confetti.push({
@@ -199,10 +199,10 @@ const Fx = (() => {
         vr: (Math.random() - 0.5) * 0.3,
       });
     }
-    burst(x, y, "#34d399", mega ? 28 : 12);
+    burst(x, y, "#b8bb26", mega ? 28 : 12);
   };
 
-  const trail = (x, y, color = "#fb923c") => {
+  const trail = (x, y, color = "#fe8019") => {
     particles.push({
       x,
       y,
@@ -216,7 +216,7 @@ const Fx = (() => {
   };
 
   let rings = [];
-  const ring = (x, y, color = "#34d399") => {
+  const ring = (x, y, color = "#b8bb26") => {
     rings.push({ x, y, r: 4, max: 80, life: 1, color });
   };
 
@@ -325,16 +325,7 @@ const session = {
   ticker: [],
   achievements: new Set(),
 };
-const NS_COLORS = [
-  "#60a5fa",
-  "#f472b6",
-  "#34d399",
-  "#fbbf24",
-  "#a78bfa",
-  "#fb923c",
-  "#22d3ee",
-  "#f87171",
-];
+const NS_COLORS = ["#83a598", "#fabd2f", "#b8bb26", "#fe8019", "#8ec07c", "#fb4934", "#ebdbb2", "#928374"];
 const nsColor = (ns) => {
   if (!ns) return null;
   let h = 0;
@@ -930,8 +921,8 @@ function buildCardEl(c) {
   el.addEventListener("click", (e) => {
     if (e.target.closest("a")) return;
     const r = rectCenter(el);
-    Fx.burst(r.x, r.y, nsColor(c.north_star) || "#a78bfa", 20);
-    Fx.ring(r.x, r.y, nsColor(c.north_star) || "#a78bfa");
+    Fx.burst(r.x, r.y, nsColor(c.north_star) || "#83a598", 20);
+    Fx.ring(r.x, r.y, nsColor(c.north_star) || "#83a598");
     el.classList.remove("sparkle-burst");
     void el.offsetWidth;
     el.classList.add("sparkle-burst");
@@ -1058,7 +1049,7 @@ function animateMove(slug, fromCol, toCol, reason = "move") {
     else Sound.move();
 
     const color =
-      toCol === "done" ? "#34d399" : toCol === "doing" ? "#fb923c" : "#60a5fa";
+      toCol === "done" ? "#b8bb26" : toCol === "doing" ? "#fe8019" : "#83a598";
     Fx.burst(start.left + start.width / 2, start.top + start.height / 2, color, 14);
     Fx.ring(start.left + start.width / 2, start.top + start.height / 2, color);
 
@@ -1105,7 +1096,7 @@ function animateMove(slug, fromCol, toCol, reason = "move") {
         if (toCol === "done") {
           const mega = session.streak >= 2;
           Fx.celebrate(land.x, land.y, mega);
-          Fx.ring(land.x, land.y, "#34d399");
+          Fx.ring(land.x, land.y, "#b8bb26");
           el.classList.add("fresh-ship");
           setTimeout(() => el.classList.remove("fresh-ship"), 1200);
           onSessionShip(c.title, land.x, land.y);
@@ -1183,7 +1174,7 @@ function renderCrew(routines) {
       crewEl.appendChild(el);
       bindTooltip(el, () => routineTooltipHtml(routineMap.get(r.id) || r));
     }
-    el.style.setProperty("--wcolor", r.color || "#64748b");
+    el.style.setProperty("--wcolor", r.color || "#928374");
     el.classList.remove("mood-idle", "mood-active", "mood-working", "mood-error");
     el.classList.add(`mood-${r.mood || "idle"}`);
     el.querySelector(".avatar").textContent = r.emoji || "⚙️";
@@ -1352,8 +1343,8 @@ async function applyState(data) {
         // stayed put but unblocked
         Sound.unblock();
         const rc = rectCenter(el);
-        Fx.burst(rc.x, rc.y, "#60a5fa", 16);
-        Fx.ring(rc.x, rc.y, "#60a5fa");
+        Fx.burst(rc.x, rc.y, "#83a598", 16);
+        Fx.ring(rc.x, rc.y, "#83a598");
         pushFeed({
           emoji: "🔓",
           who: "Groom / deps",
@@ -1475,12 +1466,12 @@ function renderHands(workers, cards) {
         const cardEl = cardEls.get(slug);
         if (!cardEl) return;
         cardEl.scrollIntoView({ behavior: "smooth", block: "center" });
-        cardEl.style.outline = "2px solid #fb923c";
+        cardEl.style.outline = "2px solid #fe8019";
         setTimeout(() => {
           cardEl.style.outline = "";
         }, 1400);
         const rc = rectCenter(cardEl);
-        Fx.burst(rc.x, rc.y, overloaded ? "#f87171" : "#fb923c", 16);
+        Fx.burst(rc.x, rc.y, overloaded ? "#fb4934" : "#fe8019", 16);
         Sound.pickup();
         if (load > 1) {
           showToast(`${w.label}: card ${idx + 1}/${load} — ${SHORT(bySlug.get(slug)?.title || slug, 40)}`, 1800);
@@ -1825,7 +1816,7 @@ async function parade() {
   const el = cardEls.get(sample.slug);
   if (!el) return;
   const start = rectCenter(el);
-  Fx.burst(start.x, start.y, "#a78bfa", 24);
+  Fx.burst(start.x, start.y, "#83a598", 24);
   Fx.celebrate(start.x, start.y, true);
   speak("kanban-pickup", "Showtime!", 2000);
   speak("pipeline-health", "Looking healthy", 2500);
@@ -1855,7 +1846,7 @@ async function parade() {
         node.style.top = y + "px";
         node.style.transform = `scale(${1 + e * 0.06}) rotate(${e * 3}deg)`;
         if (now - lastTrail > 30) {
-          Fx.trail(r.left + r.width / 2, y + r.height / 2, "#fb923c");
+          Fx.trail(r.left + r.width / 2, y + r.height / 2, "#fe8019");
           lastTrail = now;
         }
         if (t < 1) requestAnimationFrame(step);
@@ -1864,8 +1855,8 @@ async function parade() {
           node.style.width = node.style.left = node.style.top = node.style.transform = "";
           slots.doing.prepend(node);
           animating.delete(c.slug);
-          Fx.burst(r.left + r.width / 2, r.top, "#fb923c", 10);
-          Fx.ring(r.left + r.width / 2, r.top, "#fb923c");
+          Fx.burst(r.left + r.width / 2, r.top, "#fe8019", 10);
+          Fx.ring(r.left + r.width / 2, r.top, "#fe8019");
           res();
         }
       };
