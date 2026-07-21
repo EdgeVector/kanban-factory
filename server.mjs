@@ -375,13 +375,43 @@ async function fetchCardAsk(slug) {
   return payload;
 }
 
+/** Normalize routine ids so pickup fleet workers collapse to one persona. */
+function normalizeRoutineId(raw) {
+  const id = String(raw || "").trim();
+  if (!id) return id;
+  // last-stack-fkanban-pickup, last-stack-fkanban-pickup-w3, kanban-pickup-w2 → kanban-pickup
+  if (/(?:^|-)(?:fkanban-)?pickup(?:-w\d+)?$/i.test(id) || /^kanban-pickup(?:-w\d+)?$/i.test(id)) {
+    return "kanban-pickup";
+  }
+  // last-stack-fkanban-watch → kanban-watch
+  if (/(?:^|-)(?:fkanban-)?watch$/i.test(id) || /^kanban-watch$/i.test(id)) {
+    return "kanban-watch";
+  }
+  if (/(?:^|-)groom-board$/i.test(id) || /^groom-board$/i.test(id)) {
+    return "groom-board";
+  }
+  // Strip last-stack- prefix for roster matching when a persona exists
+  if (id.startsWith("last-stack-")) {
+    const short = id.slice("last-stack-".length);
+    if (ROUTINE_PERSONAS[short]) return short;
+    // last-stack-pipeline-health → pipeline-health etc.
+    if (ROUTINE_PERSONAS[short.replace(/^fkanban-/, "")]) {
+      return short.replace(/^fkanban-/, "");
+    }
+  }
+  return id;
+}
+
 function parseHeartbeats(text) {
   if (!text) return [];
   const lines = text.split("\n");
   const events = [];
   // Lines like: kanban-pickup 2026-07-16T21:41:43Z noop idle nothing-safe reason=...
+  // Also: 2026-07-20T16:45:42.593Z last-stack-fkanban-pickup-w3 ok harness=...
   const re =
     /^([a-z0-9][a-z0-9-]*)\s+(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+(ok|noop|error|fail|red|green)?\s*(.*)$/i;
+  const reIsoFirst =
+    /^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+([a-z0-9][a-z0-9-]*)\s+(ok|noop|error|fail|red|green)?\s*(.*)$/i;
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("---")) continue;
@@ -392,7 +422,7 @@ function parseHeartbeats(text) {
     // bare name-only heartbeats
     if (/^[a-z0-9-]+$/.test(trimmed) && ROUTINE_PERSONAS[trimmed]) {
       events.push({
-        routine: trimmed,
+        routine: normalizeRoutineId(trimmed),
         at: null,
         status: "ok",
         detail: "heartbeat",
@@ -400,20 +430,33 @@ function parseHeartbeats(text) {
       });
       continue;
     }
-    const m = trimmed.match(re);
+    let m = trimmed.match(re);
+    if (m) {
+      const routine = normalizeRoutineId(m[1]);
+      if (routine.length < 3) continue;
+      events.push({
+        routine,
+        at: m[2],
+        status: (m[3] || "ok").toLowerCase(),
+        detail: (m[4] || "").slice(0, 280),
+        raw: trimmed.slice(0, 400),
+      });
+      continue;
+    }
+    m = trimmed.match(reIsoFirst);
     if (!m) continue;
-    const routine = m[1];
-    // skip non-routine noise
+    const routine = normalizeRoutineId(m[2]);
     if (routine.length < 3) continue;
     events.push({
       routine,
-      at: m[2],
+      at: m[1],
       status: (m[3] || "ok").toLowerCase(),
       detail: (m[4] || "").slice(0, 280),
       raw: trimmed.slice(0, 400),
     });
   }
-  return events.slice(0, 120);
+  // Prefer newest events: keep last 200 parsed lines (log is usually append-order).
+  return events.slice(-200);
 }
 
 function extractWorkerInstances(cards) {
@@ -481,10 +524,30 @@ function extractWorkerInstances(cards) {
   return [...workers.values()].sort((a, b) => b.load - a.load || a.label.localeCompare(b.label));
 }
 
+function heartbeatAgeMs(at) {
+  if (!at) return Infinity;
+  const t = Date.parse(at);
+  if (!Number.isFinite(t)) return Infinity;
+  return Date.now() - t;
+}
+
+/** Heartbeats older than this are treated as idle (unless board proves working). */
+const CREW_STALE_MS = 2 * 60 * 60 * 1000; // 2h
+
 function buildRoutineRoster(events, cards) {
+  // Newest event wins per routine (events may be chronological).
   const latestByRoutine = new Map();
   for (const e of events) {
-    if (!latestByRoutine.has(e.routine)) latestByRoutine.set(e.routine, e);
+    const id = normalizeRoutineId(e.routine);
+    const prev = latestByRoutine.get(id);
+    if (!prev) {
+      latestByRoutine.set(id, { ...e, routine: id });
+      continue;
+    }
+    const prevT = Date.parse(prev.at || "") || 0;
+    const nextT = Date.parse(e.at || "") || 0;
+    // Prefer dated events; if both missing, keep later in stream.
+    if (nextT >= prevT) latestByRoutine.set(id, { ...e, routine: id });
   }
 
   // Always include known core cast even if quiet
@@ -502,7 +565,17 @@ function buildRoutineRoster(events, cards) {
     "worktree-cleanup",
   ];
 
-  const ids = new Set([...core, ...latestByRoutine.keys()]);
+  // Drop non-persona one-shot noise from the floor unless in core.
+  // (Still keep known personas and anything that is currently working on the board.)
+  const ids = new Set([...core]);
+  for (const id of latestByRoutine.keys()) {
+    if (ROUTINE_PERSONAS[id] || core.includes(id)) ids.add(id);
+  }
+
+  const pickupWorking = cards.some(
+    (c) => c.column === "doing" && /pickup/i.test(c.assignee || "")
+  );
+
   const roster = [];
   for (const id of ids) {
     const persona = ROUTINE_PERSONAS[id] || {
@@ -517,15 +590,38 @@ function buildRoutineRoster(events, cards) {
     const last = latestByRoutine.get(id);
     let mood = "idle";
     if (last) {
-      if (last.status === "error" || last.status === "fail" || last.status === "red")
-        mood = "error";
-      else if (/noop|idle/i.test(last.detail || "")) mood = "idle";
-      else if (/ok|merged|cards=|promoted|filed/i.test(`${last.status} ${last.detail}`))
+      const detail = `${last.status || ""} ${last.detail || ""}`;
+      const age = heartbeatAgeMs(last.at);
+      const stale = age > CREW_STALE_MS;
+      // Runner meta lines (harness=codex exit=0 dur=…) are not "on the floor" work.
+      const harnessOnly =
+        /\bharness=/.test(detail) &&
+        !/\b(cards=|worked=|merged|promoted|filed|moved|reclaimed|fixed=)/i.test(detail);
+      // Pickup handoff / finished unit — worker is free again.
+      const finishedHandoff =
+        /in-flight-(?:budget-handoff|ci-pending)|result=(?:merged|rolled-back|human-blocked)|final_column=/i.test(
+          detail
+        );
+      if (last.status === "error" || last.status === "fail" || last.status === "red") {
+        mood = stale ? "idle" : "error";
+      } else if (harnessOnly || finishedHandoff) {
+        mood = "idle";
+      } else if (/noop|idle|nothing-safe|budget-exhausted|quiet/i.test(detail)) {
+        mood = "idle";
+      } else if (
+        !stale &&
+        /merged|cards=\s*[1-9]|promoted|filed|worked=|moved.?done|reclaimed|ship|fixed=\s*[1-9]/i.test(
+          detail
+        )
+      ) {
+        // Real work signal — bare "ok" alone is not enough.
         mood = "active";
-      else mood = "active";
+      } else {
+        mood = "idle";
+      }
     }
-    // If any doing card assigned to a pickup worker, mark pickup active
-    if (id === "kanban-pickup" && cards.some((c) => c.column === "doing" && /pickup/i.test(c.assignee || ""))) {
+    // Board is ground truth for pickup: holding doing cards = working (overrides handoff idle).
+    if (id === "kanban-pickup" && pickupWorking) {
       mood = "working";
     }
     roster.push({
@@ -1141,9 +1237,18 @@ async function refresh() {
       // column (fkanban DEFAULT_COLUMN_LIMIT), which silently under-counts
       // backlog/done and wrecks velocity/heat stats. Bodies stay ~200-char
       // previews either way; we only need full *counts*, not full bodies.
-      const [kanbanRes, brainRes, versionSnap] = await Promise.all([
+            const heartbeatLog =
+        process.env.ROUTINE_HEARTBEATS_LOG ||
+        path.join(HOME, ".last-stack", "logs", "routine-heartbeats.log");
+
+      const [kanbanRes, brainRes, logRes, versionSnap] = await Promise.all([
         run("kanban", ["list", "--json", "--all"], 45000),
         run("brain", ["get", "routine-heartbeats", "--type", "reference"], 20000),
+        // Filesystem log is append-complete; brain record is often truncated/stale.
+        fs.promises
+          .readFile(heartbeatLog, "utf8")
+          .then((text) => ({ ok: true, out: text }))
+          .catch((e) => ({ ok: false, out: "", err: String(e) })),
         refreshLastdbVersion(false),
       ]);
 
@@ -1160,9 +1265,14 @@ async function refresh() {
         error = `kanban list failed: ${kanbanRes.err || kanbanRes.out || kanbanRes.code}`;
       }
 
+      // Prefer the complete log; fall back to brain reference.
       let events = cache.events;
-      if (brainRes.ok || brainRes.out) {
-        events = parseHeartbeats(brainRes.out);
+      const hbText =
+        (logRes.ok && logRes.out && logRes.out.length > 200 ? logRes.out : "") ||
+        ((brainRes.ok || brainRes.out) && brainRes.out) ||
+        "";
+      if (hbText) {
+        events = parseHeartbeats(hbText);
       }
 
       const workers = extractWorkerInstances(cards);

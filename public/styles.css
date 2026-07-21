@@ -1483,22 +1483,10 @@ body.theater-mode .slot { max-height: 68vh; }
   box-shadow: none;
   color: var(--fg);
 }
-.worker .avatar::after {
-  content: "";
-  position: absolute;
-  inset: -3px;
-  border-radius: 0;
-  border: 1px solid transparent;
-  border-top-color: var(--bg);
-  opacity: 0;
-}
+/* No spinning ring/line around avatars — bounce alone signals "working". */
 .worker.mood-working .avatar {
   animation: bounce 0.7s ease-in-out infinite;
   background: var(--bg);
-}
-.worker.mood-working .avatar::after {
-  opacity: 1;
-  animation: spin 0.9s linear infinite;
 }
 .worker.mood-active .avatar {
   animation: bob 1.8s ease-in-out infinite;
