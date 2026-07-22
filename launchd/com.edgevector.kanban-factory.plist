@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template only. install-launchd.sh rewrites ProgramArguments, WorkingDirectory,
+  and PATH for the actual install ROOT before copying to ~/Library/LaunchAgents.
+
+  Do not hand-copy this file to LaunchAgents — paths would point at wherever the
+  template was authored (often a dead ambient portal path).
+-->
 <plist version="1.0">
 <dict>
   <key>Label</key>
@@ -7,11 +14,11 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/tomtang/code/edgevector/kanban-factory/scripts/run.sh</string>
+    <string>__ROOT__/scripts/run.sh</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/tomtang/code/edgevector/kanban-factory</string>
+  <string>__ROOT__</string>
 
   <key>EnvironmentVariables</key>
   <dict>
@@ -20,7 +27,7 @@
     <key>USER</key>
     <string>tomtang</string>
     <key>PATH</key>
-    <string>/Users/tomtang/.local/bin:/Users/tomtang/.bun/bin:/Users/tomtang/.cargo/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>/Users/tomtang/.local/bin:/Users/tomtang/.bun/bin:/Users/tomtang/.cargo/bin:/usr/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/bin:/usr/sbin:/sbin</string>
     <key>PORT</key>
     <string>4177</string>
     <key>POLL_MS</key>

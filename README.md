@@ -7,11 +7,33 @@ changes, chips fly between stages with hop arcs, particle bursts, and soft
 blips. Routines appear as a crew of characters with personalities — Pickup
 grabs work, Groom unblocks backlog, Pipeline checks the merge clinic, etc.
 
-## Run (auto-start on login)
+## Run (auto-start on login) — proper path after portals
+
+`~/code/edgevector/kanban-factory` is a **portal** (thin pointer, no product
+tree). Do **not** install the LaunchAgent from that path or from
+`*.legacy-checkout`.
+
+**Stable runtime** (worktree of bare-cache `main`):
 
 ```bash
-# one-time install — LaunchAgent, KeepAlive, starts on login
-~/code/edgevector/kanban-factory/scripts/install-launchd.sh install
+RUNTIME="$HOME/.local/share/edgevector/kanban-factory"
+CACHE="$HOME/.cache/edgevector-git/kanban-factory.git"
+
+# refresh gate tip
+~/code/edgevector/kanban-factory/bin/wt fetch
+
+# create or update the runtime worktree on main
+if [[ -d "$RUNTIME/.git" || -f "$RUNTIME/.git" ]]; then
+  git -C "$RUNTIME" fetch --all --prune 2>/dev/null || true
+  git -C "$RUNTIME" checkout -B main main
+  git -C "$RUNTIME" reset --hard main
+else
+  mkdir -p "$(dirname "$RUNTIME")"
+  git --git-dir="$CACHE" worktree add -B main "$RUNTIME" main
+fi
+
+# install LaunchAgent (rewrites plist paths for THIS root)
+"$RUNTIME/scripts/install-launchd.sh" install
 
 open http://127.0.0.1:4177
 ```
@@ -19,18 +41,26 @@ open http://127.0.0.1:4177
 Useful later:
 
 ```bash
-~/code/edgevector/kanban-factory/scripts/install-launchd.sh status
-~/code/edgevector/kanban-factory/scripts/install-launchd.sh restart
-~/code/edgevector/kanban-factory/scripts/install-launchd.sh uninstall   # stop auto-start
+"$HOME/.local/share/edgevector/kanban-factory/scripts/install-launchd.sh" status
+"$HOME/.local/share/edgevector/kanban-factory/scripts/install-launchd.sh" restart
+"$HOME/.local/share/edgevector/kanban-factory/scripts/install-launchd.sh" update   # reset to main + reinstall
+"$HOME/.local/share/edgevector/kanban-factory/scripts/install-launchd.sh" uninstall
 ```
+
+The installer **renders** `ProgramArguments` + `WorkingDirectory` from the
+checkout it is run from (never hardcodes the ambient portal path).
+
+**Kanban CLI:** LaunchAgent PATH puts `~/.local/bin` first so board scrapes use
+host-track kanban (`~/.local/bin/kanban` → `~/.host-track/apps/fkanban/current`).
+`run.sh` also exports `KANBAN_BIN` for the server.
 
 Logs: `~/Library/Logs/kanban-factory.out.log` and `.err.log`
 
 ### Manual (no launchd)
 
 ```bash
-cd ~/code/edgevector/kanban-factory
-node server.mjs
+cd ~/.local/share/edgevector/kanban-factory
+KANBAN_BIN="$HOME/.local/bin/kanban" node server.mjs
 # PORT=4177 POLL_MS=4000 node server.mjs
 ```
 
@@ -38,7 +68,7 @@ node server.mjs
 
 | Source | How |
 |--------|-----|
-| Live cards | `kanban list --json --all` (full board; bare `--json` caps at 12/column) |
+| Live cards | host-track `kanban list --json --all` (full board; bare `--json` caps at 12/column) |
 | Routine activity | `brain get routine-heartbeats --type reference` |
 | LastDB version panel | `lastdbd`/`lastdb --version` + `lastdb status` + local `git` against `FOLD_CHECKOUT` (default `~/code/edgevector/fold`) |
 

@@ -248,6 +248,9 @@ const ROUTINE_PERSONAS = {
   },
 };
 
+/** Host-track kanban CLI (set by scripts/run.sh). Never ambient portal. */
+const KANBAN = process.env.KANBAN_BIN || "kanban";
+
 function run(cmd, args, timeoutMs = 20000) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, {
@@ -343,7 +346,7 @@ async function fetchCardAsk(slug) {
   const hit = cardAskCache.get(clean);
   if (hit && Date.now() - hit.at < CARD_ASK_TTL_MS) return hit.payload;
 
-  const res = await run("kanban", ["show", clean, "--json"], 20000);
+  const res = await run(KANBAN, ["show", clean, "--json"], 20000);
   if (!res.ok) {
     return {
       ok: false,
@@ -1242,7 +1245,7 @@ async function refresh() {
         path.join(HOME, ".last-stack", "logs", "routine-heartbeats.log");
 
       const [kanbanRes, brainRes, logRes, versionSnap] = await Promise.all([
-        run("kanban", ["list", "--json", "--all"], 45000),
+        run(KANBAN, ["list", "--json", "--all"], 45000),
         run("brain", ["get", "routine-heartbeats", "--type", "reference"], 20000),
         // Filesystem log is append-complete; brain record is often truncated/stale.
         fs.promises
