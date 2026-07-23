@@ -14,7 +14,7 @@ import { extractCardAsk } from "./public/card-ask.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "public");
 const PORT = Number(process.env.PORT || 4177);
-const POLL_MS = Number(process.env.POLL_MS || 4000);
+const POLL_MS = Number(process.env.POLL_MS || 60000);
 const HOME = process.env.HOME || "/Users/tomtang";
 /** Fold monorepo used to resolve commit ranges / release tags for the running binary. */
 const FOLD_CHECKOUT =
