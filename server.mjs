@@ -318,6 +318,7 @@ function normalizeCards(raw) {
       block_status: c.block_status || "none",
       block_reason: c.block_reason || "",
       north_star: c.north_star || "",
+      milestone: c.milestone || "",
       pr_url: c.pr_url || "",
       branch: c.branch || "",
       blocked: Boolean(c.blocked),

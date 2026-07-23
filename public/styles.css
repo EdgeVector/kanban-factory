@@ -1200,6 +1200,8 @@ body.theater-mode .slot { max-height: 68vh; }
 .badge.pri.p3 { background: var(--muted); color: var(--bg); border-color: var(--muted); }
 .badge.kind { color: var(--blue); border-color: var(--line); background: transparent; }
 .badge.repo { color: var(--aqua); border-color: var(--line); background: transparent; max-width: 7rem; }
+/* Milestone: purple accent — the outcome a card is attached to (◆ prefix). */
+.badge.milestone { color: var(--purple, #d3869b); border-color: color-mix(in srgb, var(--purple, #d3869b) 45%, transparent); background: transparent; max-width: 9rem; }
 .badge.age {
   font-variant-numeric: tabular-nums;
   font-family: var(--mono);
