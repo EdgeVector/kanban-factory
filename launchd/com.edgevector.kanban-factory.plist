@@ -31,7 +31,7 @@
     <key>PORT</key>
     <string>4177</string>
     <key>POLL_MS</key>
-    <string>4000</string>
+    <string>60000</string>
   </dict>
 
   <key>RunAtLoad</key>

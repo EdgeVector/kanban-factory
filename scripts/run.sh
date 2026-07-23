@@ -19,7 +19,7 @@ export HOME="${HOME:-/Users/tomtang}"
 export PATH="${HOME}/.local/bin:${HOME}/.bun/bin:${HOME}/.cargo/bin:/usr/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/bin:/usr/sbin:/sbin"
 
 export PORT="${PORT:-4177}"
-export POLL_MS="${POLL_MS:-4000}"
+export POLL_MS="${POLL_MS:-60000}"
 export HOST="127.0.0.1"
 
 # Explicit kanban binary for the server (spawn still uses PATH; this is for diagnostics)
