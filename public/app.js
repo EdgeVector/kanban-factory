@@ -310,6 +310,7 @@ const laneCounts = {
 
 // ─── State ──────────────────────────────────────────────────────────────────
 let cardMap = new Map(); // slug -> card data
+let milestoneMap = new Map(); // milestone slug -> { title, state, north_star, proof_status }
 let cardEls = new Map(); // slug -> DOM
 let routineMap = new Map();
 let knownEventKeys = new Set();
@@ -331,6 +332,15 @@ const nsColor = (ns) => {
   let h = 0;
   for (let i = 0; i < ns.length; i++) h = (h * 31 + ns.charCodeAt(i)) >>> 0;
   return NS_COLORS[h % NS_COLORS.length];
+};
+// The North Star a milestone rolls up to (authoritative from the portfolio;
+// falls back to the card's own north_star when the milestone isn't in the map).
+const milestoneNs = (ms, fallback = "") => milestoneMap.get(ms)?.north_star || fallback;
+// Compact milestone label for the tight card chip (drops a common prefix, caps length).
+const shortMilestone = (ms) => {
+  if (!ms) return "";
+  const s = ms.replace(/^(north-star|milestone)-/, "");
+  return s.length > 22 ? s.slice(0, 21) + "…" : s;
 };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -755,6 +765,14 @@ function cardTooltipHtml(c) {
     c.repo ? ["repo", c.repo] : null,
     c.column ? ["column", c.column] : null,
     c.assignee ? ["assignee", c.assignee] : null,
+    c.milestone
+      ? [
+          "milestone",
+          milestoneNs(c.milestone, c.north_star)
+            ? `${c.milestone}  →  ${milestoneNs(c.milestone, c.north_star)}`
+            : c.milestone,
+        ]
+      : null,
     c.north_star ? ["north star", c.north_star] : null,
     c.blocked ? ["blocked by", (c.blockedBy || []).join(", ") || "deps"] : null,
     c.block_status && c.block_status !== "none"
@@ -1218,6 +1236,16 @@ function pushFeed({ emoji, who, what, when, kind = "" }) {
 async function applyState(data) {
   const cards = data.cards || [];
   const bySlug = new Map(cards.map((c) => [c.slug, c]));
+  // Milestone → North Star, derived from the cards themselves: a card carries
+  // both its `milestone` and its `north_star`, and a card's NS is exactly its
+  // milestone's NS. This needs no extra query and is immune to the milestone
+  // portfolio read being slow/sparse. First non-empty NS per milestone wins.
+  milestoneMap = new Map();
+  for (const c of cards) {
+    if (c.milestone && !milestoneMap.get(c.milestone)?.north_star) {
+      milestoneMap.set(c.milestone, { north_star: c.north_star || "" });
+    }
+  }
 
   // Update counts
   const s = data.summary || { counts: {} };
@@ -1754,6 +1782,14 @@ function fillCardMeta(meta, c) {
     const b = document.createElement("span");
     b.className = "badge repo";
     b.textContent = c.repo.replace(/^EdgeVector\//, "");
+    meta.appendChild(b);
+  }
+  if (c.milestone) {
+    const b = document.createElement("span");
+    b.className = "badge milestone";
+    b.textContent = "◆ " + shortMilestone(c.milestone);
+    const ns = milestoneNs(c.milestone, c.north_star);
+    b.title = ns ? `milestone: ${c.milestone}\nnorth star: ${ns}` : `milestone: ${c.milestone}`;
     meta.appendChild(b);
   }
   if (c.assignee && c.column === "doing") {
