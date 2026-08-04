@@ -2,17 +2,15 @@
 # Install / load / unload the Kanban Factory LaunchAgent.
 #
 # Always installs from THIS checkout (ROOT). Rewrites the LaunchAgent plist so
-# ProgramArguments + WorkingDirectory match ROOT — never hardcodes the ambient
-# portal path ~/code/edgevector/kanban-factory (that is a thin portal after
-# 2026-07-22; product code does not live there).
+# ProgramArguments + WorkingDirectory + HOME/USER/PATH match this machine —
+# never leave author-machine placeholders in ~/Library/LaunchAgents.
 #
-# Recommended runtime (stable main worktree):
-#   ~/.local/share/edgevector/kanban-factory
-#
-#   ~/code/edgevector/kanban-factory/bin/wt fetch
-#   git --git-dir=~/.cache/edgevector-git/kanban-factory.git \
-#     worktree add -B main ~/.local/share/edgevector/kanban-factory main
+# Public install (any machine):
+#   git clone https://github.com/EdgeVector/kanban-factory.git \
+#     ~/.local/share/edgevector/kanban-factory
 #   ~/.local/share/edgevector/kanban-factory/scripts/install-launchd.sh install
+#
+# Or use a checkout under ~/lastdb-apps/kanban-factory from last-stack-install-apps.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

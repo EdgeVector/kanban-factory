@@ -1,93 +1,98 @@
 # Kanban Factory 🏭
 
-An animated live theater for your **real** Kanban board and scheduled routines.
+An animated **local** live theater for your **real** Kanban board and scheduled
+routines.
 
 Cards float on conveyor lanes (`backlog → todo → doing → done`). When the board
 changes, chips fly between stages with hop arcs, particle bursts, and soft
 blips. Routines appear as a crew of characters with personalities — Pickup
 grabs work, Groom unblocks backlog, Pipeline checks the merge clinic, etc.
 
-## Run (auto-start on login) — proper path after portals
+This UI talks only to **your machine** (Kanban + Brain CLIs over the LastDB
+socket). Nothing is uploaded; nothing is multi-tenant cloud.
 
-`~/code/edgevector/kanban-factory` is a **portal** (thin pointer, no product
-tree). Do **not** install the LaunchAgent from that path or from
-`*.legacy-checkout`.
+Public source: https://github.com/EdgeVector/kanban-factory  
+Canonical (EdgeVector contributors): `lastdb:///kanban-factory` (LastGit)
 
-**Stable runtime** (worktree of bare-cache `main`):
+## Requirements
+
+1. **LastDB stack** with Kanban initialized  
+   Follow https://thelastdb.com/llms.txt (or `last-stack-install-apps` after
+   cloning Last Stack). You need `kanban` and ideally `brain` on `PATH`.
+2. **Node 18+** (`node` on PATH; Homebrew Node is fine)
+3. A running `lastdbd` (`brew services start lastdb`)
+
+## Quick start (public install)
 
 ```bash
-RUNTIME="$HOME/.local/share/edgevector/kanban-factory"
-CACHE="$HOME/.cache/edgevector-git/kanban-factory.git"
+# After Last Stack apps are installed and `kanban init` works:
+git clone https://github.com/EdgeVector/kanban-factory.git \
+  ~/.local/share/edgevector/kanban-factory
+cd ~/.local/share/edgevector/kanban-factory
 
-# refresh gate tip
-~/code/edgevector/kanban-factory/bin/wt fetch
+# One-shot (foreground)
+node server.mjs
+# → http://127.0.0.1:4177
 
-# create or update the runtime worktree on main
-if [[ -d "$RUNTIME/.git" || -f "$RUNTIME/.git" ]]; then
-  git -C "$RUNTIME" fetch --all --prune 2>/dev/null || true
-  git -C "$RUNTIME" checkout -B main main
-  git -C "$RUNTIME" reset --hard main
-else
-  mkdir -p "$(dirname "$RUNTIME")"
-  git --git-dir="$CACHE" worktree add -B main "$RUNTIME" main
-fi
-
-# install LaunchAgent (rewrites plist paths for THIS root)
-"$RUNTIME/scripts/install-launchd.sh" install
-
+# Or auto-start on login (macOS LaunchAgent)
+./scripts/install-launchd.sh install
 open http://127.0.0.1:4177
 ```
 
-Useful later:
+If you used **Last Stack** (`~/.last-stack/bin/last-stack-install-apps`), the
+installer also clones this repo under `~/lastdb-apps/kanban-factory` when the
+GitHub mirror is public:
 
 ```bash
-"$HOME/.local/share/edgevector/kanban-factory/scripts/install-launchd.sh" status
-"$HOME/.local/share/edgevector/kanban-factory/scripts/install-launchd.sh" restart
-"$HOME/.local/share/edgevector/kanban-factory/scripts/install-launchd.sh" update   # reset to main + reinstall
-"$HOME/.local/share/edgevector/kanban-factory/scripts/install-launchd.sh" uninstall
+cd ~/lastdb-apps/kanban-factory
+node server.mjs
+# or: ./scripts/install-launchd.sh install
 ```
 
-The installer **renders** `ProgramArguments` + `WorkingDirectory` from the
-checkout it is run from (never hardcodes the ambient portal path).
+### LaunchAgent helpers
 
-**Kanban CLI:** LaunchAgent PATH puts `~/.local/bin` first so board scrapes use
-host-track kanban (`~/.local/bin/kanban` → `~/.host-track/apps/fkanban/current`).
-`run.sh` also exports `KANBAN_BIN` for the server.
+```bash
+./scripts/install-launchd.sh status
+./scripts/install-launchd.sh restart
+./scripts/install-launchd.sh update     # git pull tip (if this is a git checkout) + reinstall
+./scripts/install-launchd.sh uninstall
+```
+
+The installer **renders** `ProgramArguments`, `WorkingDirectory`, `HOME`, and
+log paths from the checkout you run it from — never hardcode another machine’s
+paths into the template.
 
 Logs: `~/Library/Logs/kanban-factory.out.log` and `.err.log`
 
-### Manual (no launchd)
+Env knobs:
 
-```bash
-cd ~/.local/share/edgevector/kanban-factory
-KANBAN_BIN="$HOME/.local/bin/kanban" node server.mjs
-# PORT=4177 POLL_MS=4000 node server.mjs
-```
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `PORT` | `4177` | HTTP bind (loopback only) |
+| `POLL_MS` | `60000` | Board poll interval |
+| `KANBAN_BIN` | first `kanban` on PATH | Board CLI |
+| `FOLD_CHECKOUT` | *(unset)* | Optional path to fold monorepo for version “ahead of running” panel |
+| `NODE_BIN` | `node` on PATH | Node binary for LaunchAgent |
 
-## What it reads (read-only)
+## What it reads (mostly read-only)
 
 | Source | How |
 |--------|-----|
-| Live cards | host-track `kanban list --json --all` (full board; bare `--json` caps at 12/column) |
-| Routine activity | `brain get routine-heartbeats --type reference` |
-| LastDB version panel | `lastdbd`/`lastdb --version` + `lastdb status` + local `git` against `FOLD_CHECKOUT` (default `~/code/edgevector/fold`) |
+| Live cards | `kanban list --json --all` (full board; bare `--json` may cap per column) |
+| Routine activity | Heartbeat log files + optional `brain` references |
+| LastDB version panel | `lastdbd`/`lastdb --version` + `lastdb status` (+ optional local `git` if `FOLD_CHECKOUT` is set) |
 
 Board/brain scrapes are read-only. Version panel is read-only (no upgrades).
 
-**One local mutation:** fleet mode switching via `routines-profile apply`:
+**One local mutation:** fleet mode switching via `routines-profile apply` when
+that CLI exists:
 
 | Endpoint | Effect |
 |---|---|
 | `GET /api/routines-profile` | Current mode + available profiles |
-| `POST /api/routines-profile` `{"profile":"low-credit"}` | Apply named profile (autosaves live first) |
+| `POST /api/routines-profile` `{"profile":"low-credit"}` | Apply named profile |
 
 UI: top-bar **Fleet** chip — click (or press **M**) for the mode panel.
-
-### LastDB version panel
-
-Top-bar chip shows the running Mini version + short SHA. Press **V** or click the
-chip to expand: commits on fold tip not in your binary, local release tags, and
-the sidebin `bak-pre-*` upgrade trail (handy for canaries / safe upgrades).
 
 ```bash
 curl -sS http://127.0.0.1:4177/api/lastdb-version | jq '.running'
@@ -105,7 +110,7 @@ curl -sS http://127.0.0.1:4177/api/lastdb-version | jq '.running'
 - Momentum bar, marquee ticker, SHIPPED stamp, screen shake, achievements
 - Theater mode (pipeline focus) · keyboard: `S` sound · `P` parade · `F` theater · `H` hum
 - Factory log of heartbeats + detected board moves
-- Polls every ~4s; animations fire on column diffs
+- Animations fire on column diffs between polls
 
 ## Crew personas (examples)
 
@@ -120,7 +125,16 @@ curl -sS http://127.0.0.1:4177/api/lastdb-version | jq '.running'
 | `north-star-rollup` | **The Cartographer** — constellation map |
 | `routine-fleet-health` | **Fleet Doctor** — routine vitals |
 
-## Requirements
+## EdgeVector maintainers (LastGit / portals)
 
-- `kanban` and `brain` CLIs on `PATH` (Last Stack / Mini socket)
-- Node 18+ (no npm install required)
+Canonical gate: `lastdb:///kanban-factory`. GitHub is a **read-only mirror**
+for public clone/browse — open change requests with `lastgit cr`, not `gh`.
+
+```bash
+# portal is empty; work only in a worktree
+~/code/edgevector/kanban-factory/bin/wt start kanban/<card-slug>
+```
+
+## License
+
+MIT — see repository metadata / LICENSE if present.
