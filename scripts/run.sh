@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
 # LaunchAgent entrypoint for Kanban Factory (read-only theater server).
 #
-# Proper install root (post-portal, 2026-07-22+):
+# Install from any checkout of this repo (git clone, last-stack-install-apps,
+# or a stable runtime dir). Prefer:
 #   ~/.local/share/edgevector/kanban-factory
-# created as a bare-cache worktree on main — NOT the ambient portal
-# ~/code/edgevector/kanban-factory and NOT *.legacy-checkout.
 #
-# Board reads go through host-track kanban:
-#   ~/.local/bin/kanban → ~/.host-track/apps/fkanban/current
+# Board reads use `kanban` on PATH (Last Stack / host-track install puts
+# ~/.local/bin first).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export HOME="${HOME:-/Users/tomtang}"
 
-# PATH hygiene (see last-stack docs/launchd-path-hygiene.md):
-# - ~/.local/bin first so host-track kanban/fkanban win
-# - /usr/bin before /opt/homebrew/bin (Homebrew git CF-segfault under launchd)
+if [[ -z "${HOME:-}" ]]; then
+  echo "error: HOME is not set" >&2
+  exit 1
+fi
+
+# PATH hygiene (see last-stack docs/launchd-path-hygiene.md when present):
+# - ~/.local/bin first so host-track / last-stack-install-apps kanban wins
+# - /usr/bin before Homebrew (Homebrew git can CF-segfault under launchd)
 export PATH="${HOME}/.local/bin:${HOME}/.bun/bin:${HOME}/.cargo/bin:/usr/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/bin:/usr/sbin:/sbin"
 
 export PORT="${PORT:-4177}"
@@ -28,9 +31,32 @@ if [[ -x "${HOME}/.local/bin/kanban" ]]; then
 elif command -v kanban >/dev/null 2>&1; then
   export KANBAN_BIN="${KANBAN_BIN:-$(command -v kanban)}"
 else
-  echo "error: kanban not found on PATH (expected host-track ~/.local/bin/kanban)" >&2
+  echo "error: kanban not found on PATH (install Last Stack apps, then: kanban init)" >&2
   exit 1
 fi
 
+resolve_node() {
+  if [[ -n "${NODE_BIN:-}" && -x "${NODE_BIN}" ]]; then
+    printf '%s\n' "${NODE_BIN}"
+    return 0
+  fi
+  if command -v node >/dev/null 2>&1; then
+    command -v node
+    return 0
+  fi
+  for candidate in /opt/homebrew/bin/node /usr/local/bin/node; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+NODE_BIN_RESOLVED="$(resolve_node)" || {
+  echo "error: node not found (need Node 18+ on PATH)" >&2
+  exit 1
+}
+
 cd "$ROOT"
-exec /opt/homebrew/bin/node "$ROOT/server.mjs"
+exec "$NODE_BIN_RESOLVED" "$ROOT/server.mjs"

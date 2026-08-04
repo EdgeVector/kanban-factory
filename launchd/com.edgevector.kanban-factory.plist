@@ -2,10 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   Template only. install-launchd.sh rewrites ProgramArguments, WorkingDirectory,
-  and PATH for the actual install ROOT before copying to ~/Library/LaunchAgents.
+  HOME/USER/PATH, and log paths for the actual install ROOT before copying to
+  ~/Library/LaunchAgents.
 
-  Do not hand-copy this file to LaunchAgents — paths would point at wherever the
-  template was authored (often a dead ambient portal path).
+  Do not hand-copy this file to LaunchAgents — placeholders would not expand.
 -->
 <plist version="1.0">
 <dict>
@@ -23,11 +23,11 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key>
-    <string>/Users/tomtang</string>
+    <string>__HOME__</string>
     <key>USER</key>
-    <string>tomtang</string>
+    <string>__USER__</string>
     <key>PATH</key>
-    <string>/Users/tomtang/.local/bin:/Users/tomtang/.bun/bin:/Users/tomtang/.cargo/bin:/usr/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/bin:/usr/sbin:/sbin</string>
+    <string>__PATH__</string>
     <key>PORT</key>
     <string>4177</string>
     <key>POLL_MS</key>
@@ -44,8 +44,8 @@
   <integer>5</integer>
 
   <key>StandardOutPath</key>
-  <string>/Users/tomtang/Library/Logs/kanban-factory.out.log</string>
+  <string>__HOME__/Library/Logs/kanban-factory.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/tomtang/Library/Logs/kanban-factory.err.log</string>
+  <string>__HOME__/Library/Logs/kanban-factory.err.log</string>
 </dict>
 </plist>

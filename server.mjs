@@ -7,6 +7,7 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractCardAsk } from "./public/card-ask.js";
@@ -15,10 +16,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "public");
 const PORT = Number(process.env.PORT || 4177);
 const POLL_MS = Number(process.env.POLL_MS || 60000);
-const HOME = process.env.HOME || "/Users/tomtang";
-/** Fold monorepo used to resolve commit ranges / release tags for the running binary. */
-const FOLD_CHECKOUT =
-  process.env.FOLD_CHECKOUT || path.join(HOME, "code/edgevector/fold");
+const HOME = process.env.HOME || os.homedir();
+/**
+ * Optional fold monorepo path for the LastDB version panel (ahead-of-running).
+ * Public installs usually leave this unset — the panel still shows binary
+ * version via `lastdbd --version` / `lastdb status`.
+ */
+const FOLD_CHECKOUT = process.env.FOLD_CHECKOUT || "";
 /** Version panel is slower to refresh than the board (git + binaries). */
 const VERSION_TTL_MS = Number(process.env.LASTDB_VERSION_TTL_MS || 60_000);
 const VERSION_COMMIT_LIMIT = 8;
@@ -1043,7 +1047,9 @@ async function collectLastdbVersion() {
     empty.ok = true;
 
     if (!foldExists) {
-      empty.aheadOfRunning.note = `No fold checkout at ${FOLD_CHECKOUT} (set FOLD_CHECKOUT)`;
+      empty.aheadOfRunning.note = FOLD_CHECKOUT
+        ? `No fold checkout at ${FOLD_CHECKOUT} (set FOLD_CHECKOUT)`
+        : "FOLD_CHECKOUT unset — version panel shows binary only";
       empty.ms = Date.now() - t0;
       empty.at = Date.now();
       return { ...empty, ok: true };
