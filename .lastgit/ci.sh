@@ -19,6 +19,7 @@ echo "== node syntax =="
 if command -v node >/dev/null 2>&1; then
   node --check server.mjs
   node --check public/app.js
+  node --check ship-meter.mjs
 elif command -v bun >/dev/null 2>&1; then
   bun --print "await import('./server.mjs')" >/dev/null 2>&1 || bun build server.mjs --target=node --outfile=/dev/null
   # bun has no --check; syntax-gate app.js via build to /dev/null
@@ -26,6 +27,11 @@ elif command -v bun >/dev/null 2>&1; then
 else
   echo "no node/bun on PATH" >&2
   exit 1
+fi
+
+echo "== ship-meter unit tests =="
+if command -v node >/dev/null 2>&1; then
+  node --test ship-meter.test.mjs
 fi
 
 echo "== required files =="

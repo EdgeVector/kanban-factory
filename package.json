@@ -6,6 +6,7 @@
   "description": "Animated live theater for your real Kanban board + routines",
   "scripts": {
     "start": "node server.mjs",
-    "dev": "node server.mjs"
+    "dev": "node server.mjs",
+    "test": "node --test *.test.mjs"
   }
 }

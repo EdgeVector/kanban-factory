@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractCardAsk } from "./public/card-ask.js";
+import { collectShipMeter, computeShipMeter } from "./ship-meter.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "public");
@@ -663,11 +664,15 @@ function parseIsoMs(iso) {
 }
 
 /**
- * Throughput from board timestamps (done_at for ships; updated_at for activity).
- * Note: only cards still on the board are visible — archived/deleted done cards
- * are not counted. Still a useful live-board rate meter.
+ * Board-completions throughput from board timestamps (done_at; updated_at for
+ * activity). NOT a ship rate: only cards still on the board are visible, and
+ * last-stack-card-reaper deletes done cards on a ~6h cycle, so this series
+ * decays toward zero as a night passes even when merges kept landing. The
+ * real ship rate is `velocity.ships` / `velocity.hourly`, computed by
+ * ship-meter.mjs from merges, not cards. This series stays for the board's
+ * own completion signal — see `velocity.boardCompletions` in statePayload().
  */
-function computeVelocity(cards) {
+function computeBoardCompletions(cards) {
   const now = Date.now();
   const hourMs = 3600_000;
   const windows = [
@@ -731,7 +736,7 @@ function computeVelocity(cards) {
     activity,
     hourly: buckets,
     peakHour: peak,
-    note: "Rates from cards still on the board (done_at / updated_at).",
+    note: "Board completions, not the ship rate: only cards still on the board are visible, and the reaper deletes done cards on a cycle. See velocity.ships for the merge-derived rate.",
   };
 }
 
@@ -1245,7 +1250,7 @@ async function refresh() {
         process.env.ROUTINE_HEARTBEATS_LOG ||
         path.join(HOME, ".last-stack", "logs", "routine-heartbeats.log");
 
-      const [kanbanRes, brainRes, logRes, versionSnap] = await Promise.all([
+      const [kanbanRes, brainRes, logRes, versionSnap, shipMeterCollected] = await Promise.all([
         run(KANBAN, ["list", "--json", "--all"], 45000),
         run("brain", ["get", "routine-heartbeats", "--type", "reference"], 20000),
         // Filesystem log is append-complete; brain record is often truncated/stale.
@@ -1254,6 +1259,9 @@ async function refresh() {
           .then((text) => ({ ok: true, out: text }))
           .catch((e) => ({ ok: false, out: "", err: String(e) })),
         refreshLastdbVersion(false),
+        // Merge-derived ship rate (see ship-meter.mjs). Never throws: a
+        // collection failure keeps the previous shipMeter, not a crash.
+        collectShipMeter({ home: HOME }).catch((e) => ({ collectError: String(e?.message || e) })),
       ]);
 
       let cards = cache.cards;
@@ -1282,7 +1290,39 @@ async function refresh() {
       const workers = extractWorkerInstances(cards);
       const routines = buildRoutineRoster(events, cards);
       const summary = summarize(cards);
-      const velocity = computeVelocity(cards);
+      const boardCompletions = computeBoardCompletions(cards);
+
+      let shipMeter = cache.shipMeter;
+      let shipMeterError = null;
+      if (shipMeterCollected && !shipMeterCollected.collectError) {
+        try {
+          shipMeter = computeShipMeter({
+            mergeRows: shipMeterCollected.rows,
+            repoAvailability: shipMeterCollected.repoAvailability,
+            nowMs: Date.now(),
+          });
+        } catch (e) {
+          shipMeterError = `ship-meter compute: ${e.message}`;
+        }
+      } else {
+        shipMeterError = `ship-meter collect: ${shipMeterCollected?.collectError || "unknown"}`;
+      }
+      if (!shipMeter) {
+        // Cold start with no prior cache and a failed first collection: report
+        // unavailable, never a silent 0 (the exact defect this replaces).
+        shipMeter = computeShipMeter({ mergeRows: [], repoAvailability: { startup: false }, nowMs: Date.now() });
+      }
+
+      const velocity = {
+        ships: shipMeter.ships,
+        hourly: shipMeter.hourly,
+        peakHour: shipMeter.peakHour,
+        available: shipMeter.available,
+        unavailableRepos: shipMeter.unavailableRepos,
+        note: shipMeter.note,
+        error: shipMeterError,
+        boardCompletions,
+      };
 
       let routinesProfile = cache.routinesProfile;
       try {
@@ -1307,6 +1347,7 @@ async function refresh() {
         workers,
         summary,
         velocity,
+        shipMeter,
         lastdbVersion: versionSnap || cache.lastdbVersion,
         routinesProfile,
         error,
