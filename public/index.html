@@ -58,6 +58,16 @@
     </div>
   </header>
 
+  <section class="pc-ci-controls" aria-label="PC CI controls">
+    <strong>PC CI</strong>
+    <span id="pc-ci-status" role="status" aria-live="polite">Check PC status…</span>
+    <button id="pc-ci-pause" class="chip" type="button" disabled>Pause PC</button>
+    <button id="pc-ci-resume" class="chip" type="button" disabled>Resume PC</button>
+    <button id="pc-ci-refresh" class="chip" type="button">Refresh</button>
+    <small>Pause lets active jobs finish. PC CI checks and merges can wait.</small>
+  </section>
+  <script type="module" src="/pc-ci.js"></script>
+
   <div class="momentum" id="momentum" title="Recent board activity">
     <div class="momentum-fill" id="momentum-fill"></div>
     <span class="momentum-label" id="momentum-label">idle floor</span>
