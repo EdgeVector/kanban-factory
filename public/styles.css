@@ -2135,3 +2135,10 @@ body.theater-mode .pipeline {
 .mono, .slug-row, code, pre {
   font-family: var(--mono) !important;
 }
+
+.pc-ci-controls { display:flex; align-items:center; flex-wrap:wrap; gap:10px; padding:10px 18px; border-bottom:1px solid #665c54; background:#1d2021; color:#ebdbb2; }
+.pc-ci-controls #pc-ci-status { flex:1 1 240px; }
+.pc-ci-controls small { flex-basis:100%; color:#bdae93; }
+.pc-ci-controls .chip:disabled { opacity:.45; cursor:default; }
+.pc-ci-controls [data-phase="paused"] { color:#b8bb26; }
+.pc-ci-controls [data-phase="error"], .pc-ci-controls [data-phase="unknown"] { color:#fabd2f; }

@@ -2,9 +2,11 @@
 /**
  * Kanban Factory — local live data server.
  * Serves the theater UI and polls real kanban + routine heartbeats.
- * Never mutates the board. Read-only.
+ * Board reads stay read-only. Explicit local controls manage fleet and PC CI.
  */
 import http from "node:http";
+import { PcCiController } from "./pc-ci.mjs";
+import { pcCiHandler } from "./pc-ci-http.mjs";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -1403,8 +1405,12 @@ function contentType(file) {
   return "application/octet-stream";
 }
 
+const pcCi = pcCiHandler(new PcCiController(), PORT);
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host}`);
+
+  if (url.pathname === "/api/pc-ci") return pcCi(req, res);
 
   if (url.pathname === "/api/state") {
     const force = url.searchParams.get("refresh") === "1";

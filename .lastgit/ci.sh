@@ -31,7 +31,8 @@ fi
 
 echo "== ship-meter unit tests =="
 if command -v node >/dev/null 2>&1; then
-  node --test ship-meter.test.mjs
+  node --test *.test.mjs
+  python3 scripts/pc-ci-remote.test.py
 fi
 
 echo "== required files =="

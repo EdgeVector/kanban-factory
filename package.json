@@ -16,6 +16,6 @@
   "scripts": {
     "start": "node server.mjs",
     "dev": "node server.mjs",
-    "test": "node --test *.test.mjs"
+    "test": "node --test *.test.mjs && python3 scripts/pc-ci-remote.test.py"
   }
 }

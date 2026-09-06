@@ -138,3 +138,48 @@ for public clone/browse — open change requests with `lastgit cr`, not `gh`.
 ## License
 
 MIT — see repository metadata / LICENSE if present.
+
+## PC CI pause
+
+Use the **PC CI** row below the factory header:
+
+1. Select **Pause PC**.
+2. Wait for **PC ready for games**. Active jobs must finish first.
+3. Select **Resume PC** when you want CI to use the PC again.
+
+The control covers `forgejo-runner` and `forgejo-runner-heavy` on the `pc` SSH host.
+It does not stop Windows or WSL. Jobs that require PC labels wait in Forgejo.
+The runner grace period is at least three hours. Jobs that exceed that period can be cancelled by the runner.
+There is no force-stop button. Resume stays disabled while active jobs finish.
+
+The control uses the existing SSH alias, passwordless sudo, Python 3, systemd,
+and the installed `situations` CLI. The Mac also needs Python 3 for the OS request lock. It does not require a new credential.
+The factory binds to loopback. PC mutations require a matching Origin, Host, and page token.
+
+Pause records intent at `~/.local/state/last-stack/pc-ci/state.json` and creates
+Situation `factory-pc-ci-owner-pause`. It saves the PC watchdog's prior state,
+then disables and unloads that watchdog. The PC receives a persistent marker
+at `/var/lib/edgevector/pc-ci-paused` and a guarded systemd drop-in for each runner.
+The guard blocks service starts after a PC reboot or an external restart request.
+The drop-ins also set an unlimited systemd stop timeout and send SIGTERM only
+to the runner process. The runner stops new job requests and waits for its jobs.
+
+Install the companion `EdgeVector/last-stack` change for
+`last-stack-forge-runner-watchdog` before use. It reads the same intent file
+and suppresses expected PC lane alerts. Mac runner and Forge API alerts remain active.
+
+A failed operation retains the pause intent and recovery metadata. Select **Refresh**
+to inspect the status, then **Resume PC** to retry recovery. An unavailable PC never
+appears ready for games. A factory restart preserves the pause. The OS releases a dead controller
+lock automatically; a live controller lock blocks duplicate requests.
+
+### Tests
+
+```sh
+npm test
+node scripts/pc-ci-demo.mjs
+```
+
+The demo at `http://127.0.0.1:14177` uses simulated SSH, launchctl, and Situations.
+It cannot pause the live PC. Select **Finish fixture jobs** to complete its test job.
+The production server has no fixture mode or test mutation endpoint.
