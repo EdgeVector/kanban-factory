@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 shopt -s nullglob 2>/dev/null || true
 
 echo "== venue =="
-test "$(head -n 1 .last-stack/pr-venue)" = "lastgit"
+test "$(head -n 1 .last-stack/pr-venue)" = "forgejo"
 
 echo "== shell syntax =="
 for f in .lastgit/*.sh scripts/*.sh; do

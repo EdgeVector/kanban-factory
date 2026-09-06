@@ -12,7 +12,7 @@ This UI talks only to **your machine** (Kanban + Brain CLIs over the LastDB
 socket). Nothing is uploaded; nothing is multi-tenant cloud.
 
 Public source: https://github.com/EdgeVector/kanban-factory  
-Canonical (EdgeVector contributors): `lastdb:///kanban-factory` (LastGit)
+Canonical (EdgeVector contributors): `http://localhost:3300/EdgeVector/kanban-factory.git` (LastGit)
 
 ## Requirements
 
@@ -127,7 +127,7 @@ curl -sS http://127.0.0.1:4177/api/lastdb-version | jq '.running'
 
 ## EdgeVector maintainers (LastGit / portals)
 
-Canonical gate: `lastdb:///kanban-factory`. GitHub is a **read-only mirror**
+Canonical gate: `http://localhost:3300/EdgeVector/kanban-factory.git`. GitHub is a **read-only mirror**
 for public clone/browse — open change requests with `lastgit cr`, not `gh`.
 
 ```bash
