@@ -54,7 +54,7 @@ node server.mjs
 ```bash
 ./scripts/install-launchd.sh status
 ./scripts/install-launchd.sh restart
-./scripts/install-launchd.sh update     # git pull tip (if this is a git checkout) + reinstall
+./scripts/install-launchd.sh update     # reset this checkout to origin/main + reinstall
 ./scripts/install-launchd.sh uninstall
 ```
 

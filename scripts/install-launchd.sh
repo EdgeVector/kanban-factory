@@ -25,16 +25,49 @@ LAUNCHD_PATH="${HOME}/.local/bin:${HOME}/.bun/bin:${HOME}/.cargo/bin:/usr/bin:/o
 
 usage() {
   cat <<EOF
-Usage: $0 <install|uninstall|status|restart|update>
+Usage: $0 <install|uninstall|status|restart|update|refresh-git>
 
-  install    Render plist for this ROOT, bootstrap LaunchAgent, start
-  uninstall  Bootout and remove the installed plist
-  status     Show launchctl + health URL + which kanban/factory root
-  restart    Kickstart the job (or install if missing)
-  update     Fetch tip into this worktree (if linked) + reinstall + restart
+  install      Render plist for this ROOT, bootstrap LaunchAgent, start
+  uninstall    Bootout and remove the installed plist
+  status       Show launchctl + health URL + which kanban/factory root
+  restart      Kickstart the job (or install if missing)
+  update       Reset this checkout to origin/main + reinstall + restart
+  refresh-git  Fetch origin/main and hard-reset this checkout to that tip
 
 This ROOT: $ROOT
 EOF
+}
+
+# Reset ROOT to refs/remotes/origin/main. Local `main` is not the tip: a
+# registered worktree that checks out `main` freezes that ref, so
+# `reset --hard main` is a no-op on a stale install (live :4177 sat on
+# 31a4fe1 for ~8 weeks while origin/main already had ship-meter.mjs).
+refresh_git() {
+  if ! git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "Not a git checkout; leaving $ROOT as-is"
+    return 0
+  fi
+  echo "Updating checkout at $ROOT to origin/main …"
+  fetch_ok=0
+  if command -v last-stack-forge-git >/dev/null 2>&1; then
+    if last-stack-forge-git -C "$ROOT" fetch origin --prune \
+        '+refs/heads/main:refs/remotes/origin/main'; then
+      fetch_ok=1
+    fi
+  elif git -C "$ROOT" fetch origin --prune \
+      '+refs/heads/main:refs/remotes/origin/main'; then
+    fetch_ok=1
+  fi
+  if ! git -C "$ROOT" rev-parse --verify refs/remotes/origin/main >/dev/null 2>&1; then
+    echo "error: origin/main missing after fetch (fetch_ok=${fetch_ok})" >&2
+    return 1
+  fi
+  if [[ "$fetch_ok" -eq 0 ]]; then
+    echo "warn: git fetch origin failed; resetting to already-cached origin/main"
+  fi
+  git -C "$ROOT" checkout -B main refs/remotes/origin/main
+  git -C "$ROOT" reset --hard refs/remotes/origin/main
+  git -C "$ROOT" log -1 --oneline
 }
 
 health() {
@@ -167,20 +200,15 @@ case "$cmd" in
     echo -n "Health: "; health; echo
     ;;
   update)
-    # Best-effort: if this is a git worktree, hard-reset to main tip from its gitdir
-    if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      echo "Updating worktree at $ROOT …"
-      git -C "$ROOT" fetch --all --prune 2>/dev/null || true
-      # Prefer remote main from bare/origin if present
-      if git -C "$ROOT" rev-parse --verify main >/dev/null 2>&1; then
-        git -C "$ROOT" checkout -B main main
-        git -C "$ROOT" reset --hard main
-      fi
-      git -C "$ROOT" log -1 --oneline
-    else
-      echo "Not a git worktree; reinstalling scripts as-is from $ROOT"
+    refresh_git
+    if [[ "${KANBAN_FACTORY_SKIP_LAUNCHD:-}" == "1" ]]; then
+      echo "KANBAN_FACTORY_SKIP_LAUNCHD=1: skipped LaunchAgent reinstall"
+      exit 0
     fi
     do_install
+    ;;
+  refresh-git)
+    refresh_git
     ;;
   *)
     usage
