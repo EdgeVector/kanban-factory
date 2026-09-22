@@ -16,7 +16,7 @@ import path from "node:path";
 
 export const HOUR_MS = 3600_000;
 
-/** Repos served by a local Forgejo instance rather than LastGit. */
+/** Seed repos used only when the Forgejo organization index is unavailable. */
 export const FORGEJO_REPOS = new Set(["fold", "lastgit"]);
 
 function run(cmd, args, timeoutMs = 20000) {
@@ -183,9 +183,10 @@ export function computeShipMeter({ mergeRows, repoAvailability, nowMs, hours = 2
   };
 }
 
-async function resolveCanonicalTip(repo, { lastgitBin, forgeApiBin }) {
-  if (FORGEJO_REPOS.has(repo)) {
-    const res = await run(forgeApiBin, [`repos/EdgeVector/${repo}/branches/main`], 15000);
+async function resolveCanonicalTip(repo, { lastgitBin, forgeApiBin, forgejoBranches }) {
+  if (forgejoBranches.has(repo)) {
+    const branch = forgejoBranches.get(repo) || "main";
+    const res = await run(forgeApiBin, [`repos/EdgeVector/${repo}/branches/${encodeURIComponent(branch)}`], 15000);
     if (!res.ok) return null;
     try {
       return JSON.parse(res.out)?.commit?.id || null;
@@ -225,6 +226,44 @@ async function collectForgejoRows(repo, sinceMs, { forgeApiBin }) {
   return { rows, available: true };
 }
 
+async function listForgejoRepos(forgeApiBin) {
+  const repos = [];
+  for (let page = 1; page <= 20; page++) {
+    const res = await run(forgeApiBin, [`orgs/EdgeVector/repos?limit=100&page=${page}`], 15000);
+    if (!res.ok) return { repos: null, available: false };
+    let pageRepos;
+    try {
+      pageRepos = JSON.parse(res.out);
+    } catch {
+      return { repos: null, available: false };
+    }
+    if (!Array.isArray(pageRepos)) return { repos: null, available: false };
+    repos.push(...pageRepos);
+    if (pageRepos.length < 100) {
+      return {
+        repos: repos
+          .filter((r) => r && r.name && !r.archived && !r.mirror && !r.name.endsWith("-pullmirror-retired-20260906"))
+          .map((r) => ({ name: r.name, branch: r.default_branch || "main" })),
+        available: true,
+      };
+    }
+  }
+  return { repos: null, available: false };
+}
+
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 function parseUnreadableRepos(stderrText) {
   const set = new Set();
   for (const line of String(stderrText || "").split("\n")) {
@@ -253,6 +292,13 @@ export async function collectShipMeter({
   const repoAvailability = {};
   const rows = [];
 
+  const forgejoIndex = await listForgejoRepos(forgeApiBin);
+  const forgejoRepoEntries = forgejoIndex.available
+    ? forgejoIndex.repos
+    : [...(forgejoRepos || FORGEJO_REPOS)].map((name) => ({ name, branch: "main" }));
+  const forgejoBranches = new Map(forgejoRepoEntries.map((r) => [r.name, r.branch]));
+  if (!forgejoIndex.available) repoAvailability["forgejo-inventory"] = false;
+
   const lg = await run(
     lastgitBin,
     ["cr", "list", "--all-repos", "--state", "merged", "--since", `${sinceHours}h`, "--json"],
@@ -265,22 +311,32 @@ export async function collectShipMeter({
     lgRows = [];
   }
   const unreadable = parseUnreadableRepos(lg.err);
+  if (!lg.ok) repoAvailability["lastgit-fleet"] = false;
+  else repoAvailability["lastgit-fleet"] = true;
   for (const r of lgRows) {
+    // Forgejo PRs are the canonical source for these repos; skip any duplicate
+    // fleet records from LastGit.
+    if (forgejoBranches.has(r.repo)) continue;
     if (repoAvailability[r.repo] === undefined) repoAvailability[r.repo] = true;
     if (!r.merge_oid) continue;
     rows.push({ repo: r.repo, mergeOid: r.merge_oid, crId: r.cr_id, mergeTsMs: null });
   }
   for (const repo of unreadable) repoAvailability[repo] = false;
 
-  for (const repo of forgejoRepos) {
-    const { rows: fRows, available } = await collectForgejoRows(repo, sinceMs, { forgeApiBin });
-    repoAvailability[repo] = available;
-    if (available) rows.push(...fRows);
+  const forgejoResults = await mapLimit(forgejoRepoEntries, 6, async ({ name }) => ({
+    repo: name,
+    ...(await collectForgejoRows(name, sinceMs, { forgeApiBin })),
+  }));
+  for (const result of forgejoResults) {
+    repoAvailability[result.repo] = result.available;
+    if (result.available) rows.push(...result.rows);
   }
 
   const tipCache = new Map();
   const tipFor = async (repo) => {
-    if (!tipCache.has(repo)) tipCache.set(repo, await resolveCanonicalTip(repo, { lastgitBin, forgeApiBin }));
+    if (!tipCache.has(repo)) {
+      tipCache.set(repo, await resolveCanonicalTip(repo, { lastgitBin, forgeApiBin, forgejoBranches }));
+    }
     return tipCache.get(repo);
   };
 
