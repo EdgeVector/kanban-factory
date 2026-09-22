@@ -11,7 +11,7 @@
  * never having existed (dead-code-reaper commits, non-kanban branches) cannot
  * change the count.
  */
-import { spawn, execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import path from "node:path";
 
 export const HOUR_MS = 3600_000;
@@ -48,40 +48,24 @@ function mirrorPath(home, repo) {
 }
 
 /** True only when the mirror actually holds the object — never fetches. */
-export function gitHasObject(mirror, oid) {
+export async function gitHasObject(mirror, oid) {
   if (!oid) return false;
-  try {
-    execFileSync("git", ["-C", mirror, "cat-file", "-e", oid], { stdio: ["ignore", "ignore", "ignore"] });
-    return true;
-  } catch {
-    return false;
-  }
+  return (await run("git", ["-C", mirror, "cat-file", "-e", oid], 10_000)).ok;
 }
 
-export function gitCommitterDateMs(mirror, oid) {
-  try {
-    const out = execFileSync("git", ["-C", mirror, "show", "-s", "--format=%cI", oid], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    const t = Date.parse(out);
-    return Number.isFinite(t) ? t : null;
-  } catch {
-    return null;
-  }
+export async function gitCommitterDateMs(mirror, oid) {
+  const result = await run("git", ["-C", mirror, "show", "-s", "--format=%cI", oid], 10_000);
+  if (!result.ok) return null;
+  const t = Date.parse(result.out.trim());
+  return Number.isFinite(t) ? t : null;
 }
 
 /** true = ancestor, false = not an ancestor, null = the test itself failed (never "not landed"). */
-export function gitIsAncestor(mirror, oid, tip) {
-  try {
-    execFileSync("git", ["-C", mirror, "merge-base", "--is-ancestor", oid, tip], {
-      stdio: ["ignore", "ignore", "ignore"],
-    });
-    return true;
-  } catch (e) {
-    if (e && e.status === 1) return false;
-    return null;
-  }
+export async function gitIsAncestor(mirror, oid, tip) {
+  const result = await run("git", ["-C", mirror, "merge-base", "--is-ancestor", oid, tip], 10_000);
+  if (result.code === 0) return true;
+  if (result.code === 1) return false;
+  return null;
 }
 
 /**
@@ -300,20 +284,47 @@ export async function collectShipMeter({
     return tipCache.get(repo);
   };
 
-  for (const row of rows) {
-    const mirror = mirrorPath(home, row.repo);
-    const hasObject = (oid) => gitHasObject(mirror, oid);
-    if (row.mergeTsMs == null && hasObject(row.mergeOid)) {
-      row.mergeTsMs = gitCommitterDateMs(mirror, row.mergeOid);
+  // Do not run git synchronously in this HTTP server. The old per-merge
+  // execFileSync calls could freeze every dashboard route during a refresh.
+  // Reuse object/date lookups and cap parallel git subprocesses so the event
+  // loop stays available without flooding disk.
+  const objectCache = new Map();
+  const dateCache = new Map();
+  const hasObject = (repo, oid) => {
+    const key = `${repo}:${oid}`;
+    if (!objectCache.has(key)) {
+      objectCache.set(key, gitHasObject(mirrorPath(home, repo), oid));
     }
-    const tipOid = await tipFor(row.repo);
-    row.landed = classifyLanded({
-      mergeOid: row.mergeOid,
-      tipOid,
-      hasObject,
-      isAncestor: (a, b) => gitIsAncestor(mirror, a, b),
-    });
-  }
+    return objectCache.get(key);
+  };
+  const dateFor = (repo, oid) => {
+    const key = `${repo}:${oid}`;
+    if (!dateCache.has(key)) {
+      dateCache.set(key, gitCommitterDateMs(mirrorPath(home, repo), oid));
+    }
+    return dateCache.get(key);
+  };
+
+  let nextRow = 0;
+  const worker = async () => {
+    while (nextRow < rows.length) {
+      const row = rows[nextRow++];
+      const mirror = mirrorPath(home, row.repo);
+      const tipOid = await tipFor(row.repo);
+      if (row.mergeTsMs == null && (await hasObject(row.repo, row.mergeOid))) {
+        row.mergeTsMs = await dateFor(row.repo, row.mergeOid);
+      }
+      if (!row.mergeOid || !tipOid) {
+        row.landed = "unknown";
+      } else if (!(await hasObject(row.repo, row.mergeOid)) || !(await hasObject(row.repo, tipOid))) {
+        row.landed = "unknown";
+      } else {
+        const isAncestor = await gitIsAncestor(mirror, row.mergeOid, tipOid);
+        row.landed = isAncestor === true ? "landed" : isAncestor === false ? "unlanded" : "unknown";
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(8, rows.length) }, worker));
 
   return { rows, repoAvailability };
 }
