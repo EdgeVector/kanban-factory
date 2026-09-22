@@ -377,8 +377,10 @@ function renderVelocity(v) {
   if (!v || !v.ships) return;
   const ARC = 144.5; // approximate path length of semicircle
   // Cap speedo at 12 ships/h full scale (fun, not scientific)
-  const ph3 = v.ships.h3?.perHour ?? 0;
-  const pct = Math.min(1, ph3 / 12);
+  const ph3 = v.ships.h3?.perHour;
+  const hasRate = Number.isFinite(ph3);
+  const shownRate = hasRate ? ph3 : 0;
+  const pct = Math.min(1, shownRate / 12);
   const arc = document.getElementById("speedo-arc");
   const needle = document.getElementById("speedo-needle");
   const nEl = document.getElementById("speedo-n");
@@ -388,15 +390,16 @@ function renderVelocity(v) {
     const deg = -90 + pct * 180;
     needle.style.transform = `rotate(${deg}deg)`;
   }
-  if (nEl) nEl.textContent = String(ph3);
+  if (nEl) nEl.textContent = hasRate ? String(ph3) : "—";
 
   const setWin = (hours, key) => {
     const s = v.ships[key];
     if (!s) return;
     const ph = document.getElementById(`velo-ph-${hours}`);
     const n = document.getElementById(`velo-n-${hours}`);
-    if (ph) ph.textContent = String(s.perHour);
-    if (n) n.textContent = `${s.count} ship${s.count === 1 ? "" : "s"}`;
+    const available = Number.isFinite(s.perHour) && s.count != null;
+    if (ph) ph.textContent = available ? String(s.perHour) : "—";
+    if (n) n.textContent = available ? `${s.count} ship${s.count === 1 ? "" : "s"}` : "data unavailable";
   };
   setWin(3, "h3");
   setWin(12, "h12");
@@ -410,7 +413,12 @@ function renderVelocity(v) {
         : "peak —";
   }
   const note = document.getElementById("velo-note");
-  if (note && v.note) note.textContent = v.note;
+  if (note && v.note) {
+    const unavailable = Array.isArray(v.unavailableRepos) ? v.unavailableRepos : [];
+    note.textContent = unavailable.length
+      ? `Data incomplete. Unavailable repos: ${unavailable.join(", ")}. ${v.note}`
+      : v.note;
+  }
 
   const chart = document.getElementById("velo-chart");
   if (!chart || !Array.isArray(v.hourly)) return;
@@ -419,12 +427,14 @@ function renderVelocity(v) {
   for (const b of v.hourly) {
     const bar = document.createElement("div");
     bar.className = "velo-bar";
-    bar.dataset.n = String(b.ships || 0);
+    bar.dataset.n = b.ships == null ? "?" : String(b.ships);
     const h = Math.max(b.ships ? 8 : 2, Math.round(((b.ships || 0) / max) * 80));
     bar.style.height = h + "px";
     const tip = document.createElement("span");
     tip.className = "tip";
-    tip.textContent = `${b.label}: ${b.ships} ship${b.ships === 1 ? "" : "s"}`;
+    tip.textContent = b.ships == null
+      ? `${b.label}: data unavailable`
+      : `${b.label}: ${b.ships} ship${b.ships === 1 ? "" : "s"}`;
     bar.appendChild(tip);
     bar.title = tip.textContent;
     chart.appendChild(bar);
@@ -784,7 +794,7 @@ function cardTooltipHtml(c) {
   const ask = c.ask || "";
   const deliverable = c.deliverable || "";
   const summary = !ask && !deliverable ? c.summary || "" : "";
-  const loading = !c.askReady && !ask && !deliverable && !summary;
+  const loading = !c.askReady && !c.askError && !ask && !deliverable && !summary;
 
   return `
     <h3>${escapeHtml(c.title)}</h3>
@@ -806,6 +816,11 @@ function cardTooltipHtml(c) {
     ${
       loading
         ? `<div class="ask loading"><span class="lbl">Ask</span>Loading goal &amp; deliverable…</div>`
+        : ""
+    }
+    ${
+      c.askError
+        ? `<div class="ask"><span class="lbl">Ask</span>${escapeHtml(c.askError)}</div>`
         : ""
     }
     <div class="meta-block">
@@ -833,8 +848,16 @@ function enrichCardAskOnHover(slug, el) {
     .then((r) => r.json())
     .then((data) => {
       askFetch.delete(slug);
-      if (!data || !data.ok) return;
       const live = cardMap.get(slug) || c;
+      if (!data || !data.ok) {
+        live.askError = "Could not load goal and deliverable. Hover again to retry.";
+        cardMap.set(slug, live);
+        if (el && el.matches(":hover") && !tooltip.hidden) {
+          tooltip.innerHTML = cardTooltipHtml(live);
+        }
+        return;
+      }
+      delete live.askError;
       live.ask = data.ask || live.ask;
       live.deliverable = data.deliverable || live.deliverable;
       live.summary = data.summary || live.summary;
@@ -848,6 +871,12 @@ function enrichCardAskOnHover(slug, el) {
     })
     .catch(() => {
       askFetch.delete(slug);
+      const live = cardMap.get(slug) || c;
+      live.askError = "Could not load goal and deliverable. Hover again to retry.";
+      cardMap.set(slug, live);
+      if (el && el.matches(":hover") && !tooltip.hidden) {
+        tooltip.innerHTML = cardTooltipHtml(live);
+      }
     });
   askFetch.set(slug, p);
 }
