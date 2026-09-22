@@ -378,7 +378,7 @@ function renderVelocity(v) {
   const ARC = 144.5; // approximate path length of semicircle
   // Cap speedo at 12 ships/h full scale (fun, not scientific)
   const ph3 = v.ships.h3?.perHour;
-  const hasRate = Number.isFinite(ph3);
+  const hasRate = Number.isFinite(ph3) && v.ships.h3?.available === true && !v.ships.h3?.unknown;
   const shownRate = hasRate ? ph3 : 0;
   const pct = Math.min(1, shownRate / 12);
   const arc = document.getElementById("speedo-arc");
@@ -397,9 +397,15 @@ function renderVelocity(v) {
     if (!s) return;
     const ph = document.getElementById(`velo-ph-${hours}`);
     const n = document.getElementById(`velo-n-${hours}`);
-    const available = Number.isFinite(s.perHour) && s.count != null;
+    const available = Number.isFinite(s.perHour) && s.count != null && s.available === true && !s.unknown;
     if (ph) ph.textContent = available ? String(s.perHour) : "—";
-    if (n) n.textContent = available ? `${s.count} ship${s.count === 1 ? "" : "s"}` : "data unavailable";
+    if (n) {
+      n.textContent = s.count == null
+        ? "data unavailable"
+        : available
+          ? `${s.count} ship${s.count === 1 ? "" : "s"}`
+          : `${s.count} verified · ${s.unknown || 0} unknown · incomplete`;
+    }
   };
   setWin(3, "h3");
   setWin(12, "h12");
@@ -434,7 +440,9 @@ function renderVelocity(v) {
     tip.className = "tip";
     tip.textContent = b.ships == null
       ? `${b.label}: data unavailable`
-      : `${b.label}: ${b.ships} ship${b.ships === 1 ? "" : "s"}`;
+      : !b.available || b.unknown
+        ? `${b.label}: ${b.ships} verified · ${b.unknown || 0} unknown · incomplete`
+        : `${b.label}: ${b.ships} ship${b.ships === 1 ? "" : "s"}`;
     bar.appendChild(tip);
     bar.title = tip.textContent;
     chart.appendChild(bar);
