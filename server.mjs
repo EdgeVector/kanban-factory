@@ -14,11 +14,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractCardAsk } from "./public/card-ask.js";
 import { collectShipMeter, computeShipMeter } from "./ship-meter.mjs";
+import { DEFAULT_IDLE_POLL_MS, DEFAULT_VIEWER_IDLE_MS, shouldBackgroundRefresh } from "./poll-gate.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "public");
 const PORT = Number(process.env.PORT || 4177);
 const POLL_MS = Number(process.env.POLL_MS || 60000);
+/** Background poll runs at POLL_MS only while a viewer hit /api/state this recently (see poll-gate.mjs). 0 = always poll. */
+const VIEWER_IDLE_MS = Number(process.env.VIEWER_IDLE_MS ?? DEFAULT_VIEWER_IDLE_MS);
+/** With no viewer, refresh the cache at most this often. */
+const IDLE_POLL_MS = Number(process.env.IDLE_POLL_MS || DEFAULT_IDLE_POLL_MS);
+/** Last /api/state request (ms epoch), or null before the first one. */
+let lastViewerAt = null;
 const HOME = process.env.HOME || os.homedir();
 /**
  * Optional fold monorepo path for the LastDB version panel (ahead-of-running).
@@ -1413,6 +1420,7 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/api/pc-ci") return pcCi(req, res);
 
   if (url.pathname === "/api/state") {
+    lastViewerAt = Date.now();
     const force = url.searchParams.get("refresh") === "1";
     const stale = !cache.at || Date.now() - cache.at > POLL_MS;
     const wait = url.searchParams.get("wait") === "1";
@@ -1546,6 +1554,14 @@ refresh()
   });
 
 setInterval(() => {
+  const gate = {
+    now: Date.now(),
+    lastViewerAt,
+    cacheAt: cache.at,
+    viewerIdleMs: VIEWER_IDLE_MS,
+    idlePollMs: IDLE_POLL_MS,
+  };
+  if (!shouldBackgroundRefresh(gate)) return;
   refresh().catch((e) => {
     cache.error = String(e);
   });

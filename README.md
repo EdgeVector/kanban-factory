@@ -70,6 +70,8 @@ Env knobs:
 |----------|---------|---------|
 | `PORT` | `4177` | HTTP bind (loopback only) |
 | `POLL_MS` | `60000` | Board poll interval |
+| `VIEWER_IDLE_MS` | `600000` | Poll at `POLL_MS` only while a viewer requested `/api/state` this recently; `0` = always poll |
+| `IDLE_POLL_MS` | `600000` | With no viewer, refresh the board at most this often (each refresh reads the whole board) |
 | `KANBAN_BIN` | first `kanban` on PATH | Board CLI |
 | `FOLD_CHECKOUT` | *(unset)* | Optional path to fold monorepo for version “ahead of running” panel |
 | `NODE_BIN` | `node` on PATH | Node binary for LaunchAgent |
