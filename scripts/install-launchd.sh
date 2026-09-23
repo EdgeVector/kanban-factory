@@ -115,7 +115,7 @@ env["HOME"] = home
 env["USER"] = Path(home).name
 env["PATH"] = launchd_path
 env["PORT"] = str(env.get("PORT") or "4177")
-env["POLL_MS"] = str(env.get("POLL_MS") or "4000")
+env["POLL_MS"] = str(env.get("POLL_MS") or "60000")
 
 with dst.open("wb") as f:
     plistlib.dump(data, f, sort_keys=False)
