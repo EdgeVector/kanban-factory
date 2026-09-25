@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyLanded, computeShipMeter, HOUR_MS } from "./ship-meter.mjs";
+import {
+  classifyLanded,
+  collectForgejoRows,
+  computeShipMeter,
+  FORGEJO_PAGE_LIMIT,
+  FORGEJO_TIMEOUT_MS,
+  HOUR_MS,
+} from "./ship-meter.mjs";
 
 // A fixed "now" so hour-bucket math is deterministic in every test.
 const NOW = Date.parse("2026-09-05T12:00:00.000Z");
@@ -155,4 +162,53 @@ test("computeShipMeter: replaying the six historical zero-ship heartbeat hours a
     const bucket = meter.hourly.find((b) => b.hourAgo === hourAgo);
     assert.equal(bucket.ships, n, `hourAgo=${hourAgo} expected ${n}`);
   });
+});
+
+function pr(number, { mergedAgoH = null, updatedAgoH }) {
+  return {
+    number,
+    merged: mergedAgoH != null,
+    merge_commit_sha: mergedAgoH != null ? `sha${number}` : null,
+    merged_at: mergedAgoH != null ? new Date(hoursAgo(mergedAgoH)).toISOString() : null,
+    updated_at: new Date(hoursAgo(updatedAgoH)).toISOString(),
+  };
+}
+
+function fakeForge(pages) {
+  const calls = [];
+  const runner = async (_cmd, args, timeoutMs) => {
+    calls.push({ path: args[0], timeoutMs });
+    const page = Number(/[?&]page=(\d+)/.exec(args[0])[1]);
+    const body = pages[page - 1];
+    if (body === "timeout") return { ok: false, out: "", err: "timeout", code: -1 };
+    return { ok: true, out: JSON.stringify(body || []), err: "", code: 0 };
+  };
+  return { runner, calls };
+}
+
+test("collectForgejoRows: stops paging once a page reaches PRs older than the window", async () => {
+  const full = Array.from({ length: FORGEJO_PAGE_LIMIT }, (_, i) =>
+    pr(100 - i, { mergedAgoH: i < 3 ? 1 : null, updatedAgoH: i < 10 ? 1 : 40 }),
+  );
+  const { runner, calls } = fakeForge([full, [pr(1, { mergedAgoH: 2, updatedAgoH: 2 })]]);
+  const res = await collectForgejoRows("fold", hoursAgo(26), { forgeApiBin: "x", runner });
+  assert.equal(res.available, true);
+  assert.deepEqual(res.rows.map((r) => r.crId), ["pr-100", "pr-99", "pr-98"]);
+  assert.equal(calls.length, 1, "page 2 must not be read once page 1 ends outside the window");
+  assert.equal(calls[0].timeoutMs, FORGEJO_TIMEOUT_MS);
+  assert.match(calls[0].path, new RegExp(`limit=${FORGEJO_PAGE_LIMIT}&page=1`));
+});
+
+test("collectForgejoRows: reads the next page while the window is still open", async () => {
+  const full = Array.from({ length: FORGEJO_PAGE_LIMIT }, (_, i) => pr(200 - i, { mergedAgoH: 1, updatedAgoH: 1 }));
+  const { runner, calls } = fakeForge([full, [pr(5, { mergedAgoH: 3, updatedAgoH: 3 })]]);
+  const res = await collectForgejoRows("fold", hoursAgo(26), { forgeApiBin: "x", runner });
+  assert.equal(res.rows.length, FORGEJO_PAGE_LIMIT + 1);
+  assert.equal(calls.length, 2);
+});
+
+test("collectForgejoRows: a timed-out page renders the repo unavailable, never a silent 0", async () => {
+  const { runner } = fakeForge(["timeout"]);
+  const res = await collectForgejoRows("fold", hoursAgo(26), { forgeApiBin: "x", runner });
+  assert.deepEqual(res, { rows: null, available: false });
 });

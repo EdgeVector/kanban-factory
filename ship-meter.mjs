@@ -6,8 +6,8 @@
  * cards on a ~6h cycle, so that series decays toward zero as a night passes
  * even though merges kept landing. This module counts merges instead: a ship
  * is a change whose merge commit is an ancestor of its repo's canonical base
- * tip, read from LastGit CRs (fleet fan-out) and Forgejo-venue PRs (fold,
- * lastgit). It never reads kanban cards, so a card being reaped, renamed, or
+ * tip, read from Forgejo PRs (every repo since 2026-09-06; LastGit CRs only with
+ * KANBAN_FACTORY_LASTGIT_SHIPS=1). It never reads kanban cards, so a card being reaped, renamed, or
  * never having existed (dead-code-reaper commits, non-kanban branches) cannot
  * change the count.
  */
@@ -186,7 +186,7 @@ export function computeShipMeter({ mergeRows, repoAvailability, nowMs, hours = 2
 async function resolveCanonicalTip(repo, { lastgitBin, forgeApiBin, forgejoBranches }) {
   if (forgejoBranches.has(repo)) {
     const branch = forgejoBranches.get(repo) || "main";
-    const res = await run(forgeApiBin, [`repos/EdgeVector/${repo}/branches/${encodeURIComponent(branch)}`], 15000);
+    const res = await run(forgeApiBin, [`repos/EdgeVector/${repo}/branches/${encodeURIComponent(branch)}`], 30000);
     if (!res.ok) return null;
     try {
       return JSON.parse(res.out)?.commit?.id || null;
@@ -203,25 +203,44 @@ async function resolveCanonicalTip(repo, { lastgitBin, forgeApiBin, forgejoBranc
   }
 }
 
-async function collectForgejoRows(repo, sinceMs, { forgeApiBin }) {
-  const res = await run(
-    forgeApiBin,
-    [`repos/EdgeVector/${repo}/pulls?state=closed&limit=50&sort=recentupdate&type=pulls`],
-    20000,
-  );
-  if (!res.ok) return { rows: null, available: false };
-  let prs;
-  try {
-    prs = JSON.parse(res.out);
-  } catch {
-    return { rows: null, available: false };
-  }
+// A Forgejo pulls page carries every PR body. Under host load a 50-PR page
+// took 10-44 s (2026-09-25, load 42), past the old 20 s timeout, and the repo
+// read as unavailable. Small pages sorted by recent update stop as soon as a
+// page reaches PRs older than the window.
+export const FORGEJO_PAGE_LIMIT = 20;
+export const FORGEJO_MAX_PAGES = 5;
+export const FORGEJO_TIMEOUT_MS = 45_000;
+
+export async function collectForgejoRows(repo, sinceMs, { forgeApiBin, runner = run }) {
   const rows = [];
-  for (const pr of prs || []) {
-    if (!pr.merged || !pr.merge_commit_sha || !pr.merged_at) continue;
-    const ts = Date.parse(pr.merged_at);
-    if (!Number.isFinite(ts) || ts < sinceMs) continue;
-    rows.push({ repo, mergeOid: pr.merge_commit_sha, crId: `pr-${pr.number}`, mergeTsMs: ts });
+  for (let page = 1; page <= FORGEJO_MAX_PAGES; page++) {
+    const res = await runner(
+      forgeApiBin,
+      [
+        `repos/EdgeVector/${repo}/pulls?state=closed&limit=${FORGEJO_PAGE_LIMIT}&page=${page}&sort=recentupdate&type=pulls`,
+      ],
+      FORGEJO_TIMEOUT_MS,
+    );
+    if (!res.ok) return { rows: null, available: false };
+    let prs;
+    try {
+      prs = JSON.parse(res.out);
+    } catch {
+      return { rows: null, available: false };
+    }
+    if (!Array.isArray(prs)) return { rows: null, available: false };
+    let oldestUpdatedMs = Infinity;
+    for (const pr of prs) {
+      const updated = Date.parse(pr.updated_at || "");
+      if (Number.isFinite(updated)) oldestUpdatedMs = Math.min(oldestUpdatedMs, updated);
+      if (!pr.merged || !pr.merge_commit_sha || !pr.merged_at) continue;
+      const ts = Date.parse(pr.merged_at);
+      if (!Number.isFinite(ts) || ts < sinceMs) continue;
+      rows.push({ repo, mergeOid: pr.merge_commit_sha, crId: `pr-${pr.number}`, mergeTsMs: ts });
+    }
+    // A PR merged inside the window was updated inside it, so an older page end
+    // means no later page can hold one.
+    if (prs.length < FORGEJO_PAGE_LIMIT || oldestUpdatedMs < sinceMs) break;
   }
   return { rows, available: true };
 }
@@ -243,7 +262,11 @@ async function listForgejoRepos(forgeApiBin) {
       return {
         repos: repos
           .filter((r) => r && r.name && !r.archived && !r.mirror && !r.name.endsWith("-pullmirror-retired-20260906"))
-          .map((r) => ({ name: r.name, branch: r.default_branch || "main" })),
+          .map((r) => ({
+            name: r.name,
+            branch: r.default_branch || "main",
+            updatedMs: Date.parse(r.updated_at || "") || null,
+          })),
         available: true,
       };
     }
@@ -287,6 +310,7 @@ export async function collectShipMeter({
   lastgitBin = "lastgit",
   forgeApiBin = "last-stack-forge-api",
   forgejoRepos = FORGEJO_REPOS,
+  readLastgit = process.env.KANBAN_FACTORY_LASTGIT_SHIPS === "1",
 } = {}) {
   const sinceMs = nowMs - sinceHours * HOUR_MS;
   const repoAvailability = {};
@@ -299,34 +323,42 @@ export async function collectShipMeter({
   const forgejoBranches = new Map(forgejoRepoEntries.map((r) => [r.name, r.branch]));
   if (!forgejoIndex.available) repoAvailability["forgejo-inventory"] = false;
 
-  const lg = await run(
-    lastgitBin,
-    ["cr", "list", "--all-repos", "--state", "merged", "--since", `${sinceHours}h`, "--json"],
-    45000,
-  );
-  let lgRows = [];
-  try {
-    lgRows = JSON.parse(lg.out || "[]");
-  } catch {
-    lgRows = [];
+  // Every EdgeVector repo moved to Forgejo on 2026-09-05/06 and its LastGit
+  // repo is disabled (decision-2026-09-06-all-repos-venue-forgejo-no-lastgit-default).
+  // The fleet fan-out now fails on a missing LastgitRepoIndex, and one failed
+  // source marked every window unavailable. Read LastGit only on opt-in.
+  if (readLastgit) {
+    const lg = await run(
+      lastgitBin,
+      ["cr", "list", "--all-repos", "--state", "merged", "--since", `${sinceHours}h`, "--json"],
+      45000,
+    );
+    let lgRows = [];
+    try {
+      lgRows = JSON.parse(lg.out || "[]");
+    } catch {
+      lgRows = [];
+    }
+    const unreadable = parseUnreadableRepos(lg.err);
+    repoAvailability["lastgit-fleet"] = lg.ok;
+    for (const r of lgRows) {
+      // Forgejo PRs are the canonical source for these repos; skip any duplicate
+      // fleet records from LastGit.
+      if (forgejoBranches.has(r.repo)) continue;
+      if (repoAvailability[r.repo] === undefined) repoAvailability[r.repo] = true;
+      if (!r.merge_oid) continue;
+      rows.push({ repo: r.repo, mergeOid: r.merge_oid, crId: r.cr_id, mergeTsMs: null });
+    }
+    for (const repo of unreadable) repoAvailability[repo] = false;
   }
-  const unreadable = parseUnreadableRepos(lg.err);
-  if (!lg.ok) repoAvailability["lastgit-fleet"] = false;
-  else repoAvailability["lastgit-fleet"] = true;
-  for (const r of lgRows) {
-    // Forgejo PRs are the canonical source for these repos; skip any duplicate
-    // fleet records from LastGit.
-    if (forgejoBranches.has(r.repo)) continue;
-    if (repoAvailability[r.repo] === undefined) repoAvailability[r.repo] = true;
-    if (!r.merge_oid) continue;
-    rows.push({ repo: r.repo, mergeOid: r.merge_oid, crId: r.cr_id, mergeTsMs: null });
-  }
-  for (const repo of unreadable) repoAvailability[repo] = false;
 
-  const forgejoResults = await mapLimit(forgejoRepoEntries, 6, async ({ name }) => ({
-    repo: name,
-    ...(await collectForgejoRows(name, sinceMs, { forgeApiBin })),
-  }));
+  // A merge pushes to the repo, so a repo not updated inside the window has
+  // no merge inside it. Skipping those cuts ~40 pull reads to the active few.
+  const forgejoResults = await mapLimit(forgejoRepoEntries, 4, async ({ name, updatedMs }) =>
+    updatedMs != null && updatedMs < sinceMs
+      ? { repo: name, rows: [], available: true }
+      : { repo: name, ...(await collectForgejoRows(name, sinceMs, { forgeApiBin })) },
+  );
   for (const result of forgejoResults) {
     repoAvailability[result.repo] = result.available;
     if (result.available) rows.push(...result.rows);
