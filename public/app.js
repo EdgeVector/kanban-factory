@@ -377,8 +377,12 @@ function renderVelocity(v) {
   if (!v || !v.ships) return;
   const ARC = 144.5; // approximate path length of semicircle
   // Cap speedo at 12 ships/h full scale (fun, not scientific)
+  // A repo whose mirror is a bit stale still yields a real, if partial, verified
+  // count — that is not the same as the read itself failing (available=false).
+  // Blanking the needle to "—" whenever ANY row was unknown made the gauge read
+  // zero on almost every refresh, since some repo is nearly always mid-sync.
   const ph3 = v.ships.h3?.perHour;
-  const hasRate = Number.isFinite(ph3) && v.ships.h3?.available === true && !v.ships.h3?.unknown;
+  const hasRate = Number.isFinite(ph3) && v.ships.h3?.available === true;
   const shownRate = hasRate ? ph3 : 0;
   const pct = Math.min(1, shownRate / 12);
   const arc = document.getElementById("speedo-arc");
@@ -397,14 +401,14 @@ function renderVelocity(v) {
     if (!s) return;
     const ph = document.getElementById(`velo-ph-${hours}`);
     const n = document.getElementById(`velo-n-${hours}`);
-    const available = Number.isFinite(s.perHour) && s.count != null && s.available === true && !s.unknown;
-    if (ph) ph.textContent = available ? String(s.perHour) : "—";
+    const readable = Number.isFinite(s.perHour) && s.count != null && s.available === true;
+    if (ph) ph.textContent = readable ? String(s.perHour) : "—";
     if (n) {
       n.textContent = s.count == null
         ? "data unavailable"
-        : available
-          ? `${s.count} ship${s.count === 1 ? "" : "s"}`
-          : `${s.count} verified · ${s.unknown || 0} unknown · incomplete`;
+        : s.unknown
+          ? `${s.count} ship${s.count === 1 ? "" : "s"} · ${s.unknown} pending mirror sync`
+          : `${s.count} ship${s.count === 1 ? "" : "s"}`;
     }
   };
   setWin(3, "h3");
@@ -440,9 +444,11 @@ function renderVelocity(v) {
     tip.className = "tip";
     tip.textContent = b.ships == null
       ? `${b.label}: data unavailable`
-      : !b.available || b.unknown
-        ? `${b.label}: ${b.ships} verified · ${b.unknown || 0} unknown · incomplete`
-        : `${b.label}: ${b.ships} ship${b.ships === 1 ? "" : "s"}`;
+      : !b.available
+        ? `${b.label}: ${b.ships} ship${b.ships === 1 ? "" : "s"} (a repo read failed this cycle — incomplete)`
+        : b.unknown
+          ? `${b.label}: ${b.ships} ship${b.ships === 1 ? "" : "s"} · ${b.unknown} pending mirror sync`
+          : `${b.label}: ${b.ships} ship${b.ships === 1 ? "" : "s"}`;
     bar.appendChild(tip);
     bar.title = tip.textContent;
     chart.appendChild(bar);
