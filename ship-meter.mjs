@@ -10,6 +10,14 @@
  * KANBAN_FACTORY_LASTGIT_SHIPS=1). It never reads kanban cards, so a card being reaped, renamed, or
  * never having existed (dead-code-reaper commits, non-kanban branches) cannot
  * change the count.
+ *
+ * collectShipMeter refreshes each repo's local mirror (bounded, best-effort)
+ * before testing ancestry. Without that fetch a mirror only advances when an
+ * agent happens to run `wt fetch`, so a quiet repo's mirror goes stale, the
+ * merge/tip objects are missing locally, and every recent ship classifies as
+ * "unknown" instead of "landed" — the dashboard then shows a rate of "—" or
+ * near-zero even though merges kept landing (papercut
+ * papercut-factory-health-ship-count-swings-on-stale-local-mirrors-20260926).
  */
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -66,6 +74,20 @@ export async function gitIsAncestor(mirror, oid, tip) {
   if (result.code === 0) return true;
   if (result.code === 1) return false;
   return null;
+}
+
+export const MIRROR_FETCH_TIMEOUT_MS = 20_000;
+export const MIRROR_FETCH_CONCURRENCY = 4;
+
+/**
+ * Bounded, best-effort mirror refresh. Same refspec `wt fetch` uses
+ * (+refs/heads/*:refs/remotes/origin/*) so origin/<branch> always advances. A
+ * failure (missing mirror, no network, timeout) is swallowed — the caller
+ * falls back to whatever the mirror already held, same as before this fetch
+ * existed, never a crash or a hang.
+ */
+export async function fetchMirror(mirror, { runner = run, timeoutMs = MIRROR_FETCH_TIMEOUT_MS } = {}) {
+  return runner("git", ["-C", mirror, "fetch", "--quiet", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"], timeoutMs);
 }
 
 /**
@@ -298,10 +320,11 @@ function parseUnreadableRepos(stderrText) {
 
 /**
  * Real IO: enumerate merges across every LastGit repo (one fleet fan-out
- * process, per lastgit's own guidance) plus the Forgejo-hosted repos, resolve
- * each merge's real time and landed/unlanded/unknown classification against
- * the LOCAL mirror only (never a pack fetch — a mirror gap renders "unknown"),
- * and return { rows, repoAvailability } for computeShipMeter.
+ * process, per lastgit's own guidance) plus the Forgejo-hosted repos, refresh
+ * each involved repo's local mirror (bounded, best-effort — see fetchMirror),
+ * then resolve each merge's real time and landed/unlanded/unknown
+ * classification against the mirror, and return { rows, repoAvailability }
+ * for computeShipMeter.
  */
 export async function collectShipMeter({
   home,
@@ -311,6 +334,7 @@ export async function collectShipMeter({
   forgeApiBin = "last-stack-forge-api",
   forgejoRepos = FORGEJO_REPOS,
   readLastgit = process.env.KANBAN_FACTORY_LASTGIT_SHIPS === "1",
+  fetchMirrors = process.env.KANBAN_FACTORY_SKIP_MIRROR_FETCH !== "1",
 } = {}) {
   const sinceMs = nowMs - sinceHours * HOUR_MS;
   const repoAvailability = {};
@@ -362,6 +386,16 @@ export async function collectShipMeter({
   for (const result of forgejoResults) {
     repoAvailability[result.repo] = result.available;
     if (result.available) rows.push(...result.rows);
+  }
+
+  // Refresh only the repos that actually have a merge to classify — a mirror
+  // a quiet repo never touches would otherwise stay however stale it last was
+  // (papercut-factory-health-ship-count-swings-on-stale-local-mirrors-20260926).
+  // Best-effort: a fetch failure just leaves hasObject() reading whatever the
+  // mirror already had, same as before this step existed.
+  if (fetchMirrors) {
+    const reposToFetch = [...new Set(rows.map((r) => r.repo))];
+    await mapLimit(reposToFetch, MIRROR_FETCH_CONCURRENCY, (repo) => fetchMirror(mirrorPath(home, repo)));
   }
 
   const tipCache = new Map();

@@ -4,9 +4,11 @@ import {
   classifyLanded,
   collectForgejoRows,
   computeShipMeter,
+  fetchMirror,
   FORGEJO_PAGE_LIMIT,
   FORGEJO_TIMEOUT_MS,
   HOUR_MS,
+  MIRROR_FETCH_TIMEOUT_MS,
 } from "./ship-meter.mjs";
 
 // A fixed "now" so hour-bucket math is deterministic in every test.
@@ -211,4 +213,32 @@ test("collectForgejoRows: a timed-out page renders the repo unavailable, never a
   const { runner } = fakeForge(["timeout"]);
   const res = await collectForgejoRows("fold", hoursAgo(26), { forgeApiBin: "x", runner });
   assert.deepEqual(res, { rows: null, available: false });
+});
+
+test("fetchMirror: refreshes origin/<branch> with the same refspec wt fetch uses", async () => {
+  const calls = [];
+  const runner = async (cmd, args, timeoutMs) => {
+    calls.push({ cmd, args, timeoutMs });
+    return { ok: true, out: "", err: "", code: 0 };
+  };
+  const res = await fetchMirror("/home/.cache/edgevector-git/fold.git", { runner });
+  assert.equal(res.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].cmd, "git");
+  assert.deepEqual(calls[0].args, [
+    "-C",
+    "/home/.cache/edgevector-git/fold.git",
+    "fetch",
+    "--quiet",
+    "--prune",
+    "origin",
+    "+refs/heads/*:refs/remotes/origin/*",
+  ]);
+  assert.equal(calls[0].timeoutMs, MIRROR_FETCH_TIMEOUT_MS);
+});
+
+test("fetchMirror: a failed fetch (missing mirror, no network) resolves, never throws", async () => {
+  const runner = async () => ({ ok: false, out: "", err: "not a git repository", code: 128 });
+  const res = await fetchMirror("/home/.cache/edgevector-git/gone.git", { runner });
+  assert.equal(res.ok, false);
 });
