@@ -678,12 +678,17 @@ function parseIsoMs(iso) {
 
 /**
  * Board-completions throughput from board timestamps (done_at; updated_at for
- * activity). NOT a ship rate: only cards still on the board are visible, and
- * last-stack-card-reaper deletes done cards on a ~6h cycle, so this series
- * decays toward zero as a night passes even when merges kept landing. The
- * real ship rate is `velocity.ships` / `velocity.hourly`, computed by
- * ship-meter.mjs from merges, not cards. This series stays for the board's
- * own completion signal — see `velocity.boardCompletions` in statePayload().
+ * activity). `fkanban groom archive-done` (launchd `com.edgevector.fkanban-
+ * archive-done`, daily at 04:00) removes a card from "done" only once it is
+ * older than --cutoff-hours (default 24, not overridden by that job), so
+ * every card that shipped in the last 24h is still on the board when this
+ * runs — this is a complete, accurate ship count for that window, sourced
+ * straight from the board with no external API calls. It became the primary
+ * `velocity.ships` / `velocity.hourly` source on Tom's direction (2026-09-26)
+ * once the 24h retention was confirmed; ship-meter.mjs's merge-derived count
+ * (Forgejo PR merges + git ancestry) is kept as a cross-check under
+ * `velocity.mergeDerived` — it also catches a ship whose kanban card was
+ * renamed, deleted early, or never existed, which this board read cannot see.
  */
 function computeBoardCompletions(cards) {
   const now = Date.now();
@@ -707,6 +712,10 @@ function computeBoardCompletions(cards) {
     if (updatedAt != null) activityTimes.push(updatedAt);
   }
 
+  // available/unknown/unlanded exist so this drops straight into the same
+  // renderVelocity() shape ship-meter.mjs produces — a board read has no
+  // partial-failure mode (no external API to time out), so it's always fully
+  // available and never has an unverified row.
   const rate = (times, hours) => {
     const cut = now - hours * hourMs;
     const n = times.filter((t) => t >= cut).length;
@@ -714,6 +723,9 @@ function computeBoardCompletions(cards) {
       count: n,
       perHour: Math.round((n / hours) * 100) / 100,
       hours,
+      available: true,
+      unknown: 0,
+      unlanded: 0,
     };
   };
 
@@ -728,6 +740,9 @@ function computeBoardCompletions(cards) {
       hourAgo: i,
       label: `${String(d.getHours()).padStart(2, "0")}:00`,
       ships: n,
+      available: true,
+      unknown: 0,
+      unlanded: 0,
     });
   }
 
@@ -749,7 +764,11 @@ function computeBoardCompletions(cards) {
     activity,
     hourly: buckets,
     peakHour: peak,
-    note: "Board completions, not the ship rate: only cards still on the board are visible, and the reaper deletes done cards on a cycle. See velocity.ships for the merge-derived rate.",
+    note:
+      "Board-derived: ships = cards done_at within the window, read straight from the board " +
+      "(done cards are kept 24h by fkanban groom archive-done, so this window is complete). " +
+      "See velocity.mergeDerived for the merge-based cross-check, which also catches a ship " +
+      "whose kanban card was renamed, deleted early, or never existed.",
   };
 }
 
@@ -1328,15 +1347,31 @@ async function refresh() {
         shipMeter = computeShipMeter({ mergeRows: [], repoAvailability: { startup: false }, nowMs: Date.now() });
       }
 
+      // Board-derived is primary (Tom, 2026-09-26): done cards are kept 24h by
+      // fkanban groom archive-done, so a straight board read is a complete,
+      // accurate 24h ship count with no external API to time out. The
+      // merge-derived count (Forgejo PR merges + git ancestry) moves to
+      // mergeDerived as a cross-check — it can still time out or read
+      // "unknown" under host load, but it also catches a ship whose kanban
+      // card was renamed, deleted early, or never existed.
       const velocity = {
-        ships: shipMeter.ships,
-        hourly: shipMeter.hourly,
-        peakHour: shipMeter.peakHour,
-        available: shipMeter.available,
-        unavailableRepos: shipMeter.unavailableRepos,
-        note: shipMeter.note,
-        error: shipMeterError,
+        ships: boardCompletions.ships,
+        hourly: boardCompletions.hourly,
+        peakHour: boardCompletions.peakHour,
+        available: true,
+        unavailableRepos: [],
+        note: boardCompletions.note,
+        error: null,
         boardCompletions,
+        mergeDerived: {
+          ships: shipMeter.ships,
+          hourly: shipMeter.hourly,
+          peakHour: shipMeter.peakHour,
+          available: shipMeter.available,
+          unavailableRepos: shipMeter.unavailableRepos,
+          note: shipMeter.note,
+          error: shipMeterError,
+        },
       };
 
       let routinesProfile = cache.routinesProfile;
