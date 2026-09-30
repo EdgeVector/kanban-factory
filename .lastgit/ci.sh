@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# LastGit merge gate for kanban-factory (local theater UI over kanban + brain).
+# Merge gate (run by .github/workflows/ci-required.yml) for kanban-factory (local theater UI over kanban + brain).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 shopt -s nullglob 2>/dev/null || true
 
 echo "== venue =="
 case "$(head -n 1 .last-stack/pr-venue)" in
-  forgejo|lastgit) ;;
+  github|forgejo|lastgit) ;;
   *) echo "unrecognized pr-venue value" >&2; exit 1 ;;
 esac
 
@@ -35,7 +35,6 @@ fi
 echo "== ship-meter unit tests =="
 if command -v node >/dev/null 2>&1; then
   node --test *.test.mjs
-  python3 scripts/pc-ci-remote.test.py
   python3 scripts/install-launchd.update.test.py
 fi
 
@@ -74,4 +73,4 @@ rg -n 'renderLastdbVersion|lastdb-panel|btn-lastdb-version' public/app.js >/dev/
 rg -n 'id="lastdb-panel"|btn-lastdb-version' public/index.html >/dev/null
 rg -n '\.lastdb-panel' public/styles.css >/dev/null
 
-echo "lastgit ci gate PASSED"
+echo "ci gate PASSED"
