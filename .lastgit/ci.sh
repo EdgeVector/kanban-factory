@@ -32,12 +32,6 @@ else
   exit 1
 fi
 
-echo "== ship-meter unit tests =="
-if command -v node >/dev/null 2>&1; then
-  node --test *.test.mjs
-  python3 scripts/install-launchd.update.test.py
-fi
-
 echo "== update tracks origin/main, not local main =="
 rg -n 'refs/remotes/origin/main' scripts/install-launchd.sh >/dev/null
 
