@@ -15,7 +15,6 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "dev": "node server.mjs",
-    "test": "node --test *.test.mjs"
+    "dev": "node server.mjs"
   }
 }

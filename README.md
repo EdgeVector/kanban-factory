@@ -144,4 +144,5 @@ MIT — see repository metadata / LICENSE if present.
 ## CI
 
 CI runs on GitHub Actions (`.github/workflows/ci-required.yml`). The final job `ci-required` gates merges to `main`.
+The tests are deleted (Tom, 2026-10-09). The gate runs syntax checks, the required-file checks and the source lints.
 Nothing in this repo connects to the gaming PC. The PC CI pause control was removed on 2026-09-30.
